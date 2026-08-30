@@ -125,15 +125,26 @@ node deploy/sign-release.mjs windows 0.11.0 release/Obsidian-Portable-Windows-0.
 
 ## 3. Автозапуск
 
-**Linux (systemd):** в юнитах прописан `/usr/bin/node`. Если системный node старее 24 — а это обычное дело, — путь нужно подменить, иначе служба упадёт на разборе `.ts`:
+**Linux (systemd):** в юнитах прописан `/opt/node-24/bin/node` — тот же путь,
+что и при установке выше. Раньше здесь стоял `/usr/bin/node` и путь предлагалось
+подменять вручную; так и вышло, что служба чинилась, а таймер бэкапа — нет, и
+снимки молча не делались двое суток. Ставите node в другое место — правьте
+юниты, а не полагайтесь на `sed` при установке.
 
 ```bash
 sudo cp systemd/obsidian*.service systemd/*.timer /etc/systemd/system/
-sudo sed -i 's|/usr/bin/node|/opt/node-24/bin/node|' /etc/systemd/system/obsidian*.service
-
 sudo systemctl daemon-reload
 sudo systemctl enable --now obsidian
 sudo journalctl -u obsidian -f
+```
+
+Проверьте, что запустилось именно то, что нужно, — молчаливый промах по пути
+выглядит как «сервер работает», пока не понадобится бэкап:
+
+```bash
+systemctl is-active obsidian obsidian-backup.timer
+systemctl status obsidian-backup.service --no-pager | tail -5
+ls -t /var/backups/obsidian | head -3
 ```
 
 Юнит намеренно ужат: свой пользователь, `NoNewPrivileges`, только своя папка на запись. Мессенджер не должен иметь доступа ни к чему, кроме своей базы.

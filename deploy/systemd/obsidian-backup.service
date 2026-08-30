@@ -4,8 +4,10 @@
 # во время записи, окажется битым. Инструмент делает VACUUM INTO — консистентный
 # снимок на работающем сервере, без остановки.
 #
-# Путь к node может отличаться: системный часто старее 24, а серверу нужен
-# именно 24+. Подставьте свой (например /opt/node-24/bin/node).
+# Путь к node указан явно и намеренно не системный: серверу нужен 24+, а
+# системный обычно старее. systemd ищет ExecStart без подстановки PATH, и
+# промах виден только в журнале — этот юнит уже падал так двое суток подряд,
+# пока никто не смотрел. Ставите node в другое место — правьте здесь.
 
 [Unit]
 Description=Obsidian backup snapshot
@@ -16,7 +18,7 @@ Type=oneshot
 User=obsidian
 Group=obsidian
 WorkingDirectory=/opt/obsidian
-ExecStart=/usr/bin/node --env-file-if-exists=.env src/tools/backup.ts /var/backups/obsidian
+ExecStart=/opt/node-24/bin/node --env-file-if-exists=.env src/tools/backup.ts /var/backups/obsidian
 
 # Сколько снимков держать. Старые чистятся сами.
 Environment=OBSIDIAN_BACKUP_KEEP=14

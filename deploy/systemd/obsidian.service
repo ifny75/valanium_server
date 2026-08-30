@@ -14,7 +14,7 @@ Type=simple
 User=obsidian
 Group=obsidian
 WorkingDirectory=/opt/obsidian
-ExecStart=/usr/bin/node --env-file-if-exists=.env src/index.ts
+ExecStart=/opt/node-24/bin/node --env-file-if-exists=.env src/index.ts
 
 Restart=always
 RestartSec=5
