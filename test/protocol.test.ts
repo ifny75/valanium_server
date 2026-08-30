@@ -338,7 +338,69 @@ test("переполненная очередь получателя закры�
   // несколько аккаунтов сложатся и обойдут его, оставаясь каждый в своём ведре.
   handleMessage(deps, c.sock, c.conn, letter());
   assert.equal(c.sock.json(OP.ERROR).code, "recipient_queue_full");
-  assert.equal(store.countQueued(bob.devPub, now), limit);
+  assert.equal(store.queueUsage(bob.devPub, now).count, limit);
+  store.close();
+});
+
+test("очередь закрывается по объёму, а не только по числу конвертов", () => {
+  const store = new Store(":memory:");
+  const deps = makeDeps(store);
+  const alice = makeIdentity();
+  const bob = makeIdentity();
+  const a = register(deps, store, alice, "alice");
+  register(deps, store, bob, "bob");
+
+  /*
+    Набиваем очередь Боба немногими, но крупными конвертами: по числу штук до
+    потолка ещё далеко, а место они занимают уже всё. Ради этого потолок в
+    байтах и заводился — считать очередь в штуках при мегабайтном кадре
+    значит разрешить пять гигабайт на устройство.
+  */
+  const now = Date.now();
+  const chunk = 1024 * 1024;
+  const heavy = new Uint8Array(chunk);
+  let filled = 0;
+  while (filled + chunk <= config.maxQueuedBytesPerDevice) {
+    store.enqueue(bob.devPub, heavy, now, now + 3_600_000);
+    filled += chunk;
+  }
+
+  const usage = store.queueUsage(bob.devPub, now);
+  assert.ok(usage.count < config.maxQueuedPerDevice,
+    `потолок в штуках не должен был сработать: ${usage.count}`);
+  assert.equal(usage.bytes, filled);
+
+  handleMessage(deps, a.sock, a.conn, frame(OP.SEND,
+    concat(random(ID_LEN), bob.devPub, new Uint8Array([0, 0, 0x0e, 0x10]), ascii("x"))));
+  assert.equal(a.sock.json(OP.ERROR).code, "recipient_queue_full");
+  // Отказ случился до постановки в очередь, а не после.
+  assert.equal(store.queueUsage(bob.devPub, now).bytes, filled);
+  store.close();
+});
+
+test("почти полная по объёму очередь принимает то, что ещё влезает", () => {
+  // Обратная сторона: потолок обязан пропускать всё, что помещается, иначе
+  // он превращается в запрет переписки задолго до того, как место кончилось.
+  const store = new Store(":memory:");
+  const deps = makeDeps(store);
+  const alice = makeIdentity();
+  const bob = makeIdentity();
+  const a = register(deps, store, alice, "alice");
+  register(deps, store, bob, "bob");
+
+  const now = Date.now();
+  const chunk = 1024 * 1024;
+  const heavy = new Uint8Array(chunk);
+  let filled = 0;
+  while (filled + chunk <= config.maxQueuedBytesPerDevice - chunk) {
+    store.enqueue(bob.devPub, heavy, now, now + 3_600_000);
+    filled += chunk;
+  }
+
+  handleMessage(deps, a.sock, a.conn, frame(OP.SEND,
+    concat(random(ID_LEN), bob.devPub, new Uint8Array([0, 0, 0x0e, 0x10]), ascii("x"))));
+  assert.ok(!a.sock.has(OP.ERROR), `письмо обязано пройти: ${a.sock.opcodes()}`);
+  assert.equal(store.queueUsage(bob.devPub, now).count, filled / chunk + 1);
   store.close();
 });
 

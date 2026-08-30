@@ -935,17 +935,27 @@ export class Store {
   }
 
   /**
-   * Сколько конвертов ждёт это устройство.
+   * Сколько конвертов ждёт это устройство и сколько места они занимают.
    *
    * Очередь — единственное место, где чужой отправитель занимает наш диск, и
    * занимает его до ACK либо до истечения TTL. Без потолка один аккаунт топит
    * выбранного человека: разгребать очередь тот будет дольше, чем её наливали.
+   *
+   * Считаем оба числа сразу, одним проходом по индексу: это горячий путь,
+   * через него идёт каждое отправленное сообщение.
+   *
+   * Штук мало — нужны ещё и байты. Потолок в штуках при максимальном кадре в
+   * мегабайт разрешает пять гигабайт на одно устройство: столько на диске нет,
+   * и упрётся в него не отправитель, а весь сервер сразу.
    */
-  countQueued(recipientDevice: Bytes, now: number): number {
+  queueUsage(recipientDevice: Bytes, now: number): { count: number; bytes: number } {
     const row = this.#db
-      .prepare("SELECT COUNT(*) AS n FROM envelopes WHERE recipient_device = ? AND expires_at > ?")
-      .get(recipientDevice, now) as { n: number };
-    return row.n;
+      .prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(payload)), 0) AS b
+         FROM envelopes WHERE recipient_device = ? AND expires_at > ?`,
+      )
+      .get(recipientDevice, now) as { n: number; b: number };
+    return { count: row.n, bytes: row.b };
   }
 
   /** Строго в порядке постановки: seq монотонен, created_at — нет. */

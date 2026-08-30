@@ -1569,7 +1569,15 @@ function onSend(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
   // Потолок очереди получателя. Ведро отправителя его не заменяет: десять
   // аккаунтов в пределах своих вёдер сложатся и всё равно зальют одного
   // человека, а разгребать очередь ему.
-  if (deps.store.countQueued(parsed.recipientDevice, now) >= config.maxQueuedPerDevice) {
+  //
+  // Потолков два, и второй не про получателя, а про сервер: в штуках очередь
+  // мерить мало, потому что пять тысяч конвертов по мегабайту — это пять
+  // гигабайт на одно устройство. Ответ у обоих один и тот же намеренно —
+  // отправителю незачем знать, в какой именно предел он уткнулся, а нам
+  // незачем подсказывать, каким размером кадра его обходить.
+  const queue = deps.store.queueUsage(parsed.recipientDevice, now);
+  if (queue.count >= config.maxQueuedPerDevice
+      || queue.bytes + parsed.ciphertext.length > config.maxQueuedBytesPerDevice) {
     sock.send(errorFrame("recipient_queue_full", "recipient has too much undelivered mail"), true);
     return;
   }
