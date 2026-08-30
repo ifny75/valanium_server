@@ -84,3 +84,20 @@ src/
 - **Ошибка разбора = разрыв соединения.** Ни одной попытки «дочитать как получится».
 - **Логи без идентификаторов.** Ни pubkey, ни handle, ни IP, ни тел кадров — см. §13 архитектуры.
 - Новое поле в БД, связывающее отправителя с получателем, — блокер, а не фича.
+
+## Где остальное
+
+Obsidian разложен на четыре репозитория:
+
+| Репозиторий | Что там | Лицензия |
+|---|---|---|
+| [obsidian](https://github.com/ifny75/obsidian) | ядро: криптография, MLS, протокол | AGPL-3.0 |
+| [obsidian_server](https://github.com/ifny75/obsidian_server) | сервер и конфиги узлов | AGPL-3.0 |
+| [obsidian_android](https://github.com/ifny75/obsidian_android) | клиент для Android | PolyForm Noncommercial 1.0.0 |
+| [obsidian_pc](https://github.com/ifny75/obsidian_pc) | клиент для Windows | PolyForm Noncommercial 1.0.0 |
+
+## Лицензия
+
+**AGPL-3.0**, см. [LICENSE](LICENSE). Поднимайте у себя, меняйте, форкайте. Если запустите изменённую версию как сервис — исходники ваших правок должны быть доступны тем, кто им пользуется.
+
+Имя «Obsidian» лицензией не покрывается — см. [TRADEMARK.md](TRADEMARK.md).

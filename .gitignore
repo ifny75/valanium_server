@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Данные живого сервера: аккаунты, конверты, ключ шифрования столбцов.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.tar.gz
+deploy/migration-backup/
