@@ -13,6 +13,11 @@
 Description=Obsidian backup snapshot
 After=obsidian.service
 
+# Снимок сделан — отправляем копию наружу. Именно OnSuccess, а не Wants:
+# отправлять нечего, если снимок не удался, и незачем поднимать шум дважды
+# об одной и той же поломке.
+OnSuccess=obsidian-offsite.service
+
 [Service]
 Type=oneshot
 User=obsidian

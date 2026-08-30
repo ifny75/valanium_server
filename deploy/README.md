@@ -281,6 +281,106 @@ sudo systemctl enable --now obsidian-backup.timer
 
 Раз в сутки, 14 снимков, старые чистятся сами (`OBSIDIAN_BACKUP_KEEP`). Разовый прогон: `node src/tools/backup.ts /var/backups/obsidian`.
 
+### 7a. Копия вне main
+
+Снимки выше лежат на том же диске, что и оригинал. Это спасает от испорченной
+базы, но не от потери машины: умрёт main — умрут и копии. Поэтому снимок ещё и
+уезжает на второй узел, зашифрованным.
+
+Приёмник — relay, доверенным хранилищем он не является, а в базе метаданные
+открытым текстом: ключи личностей, chat code, хеши имён. Значит, туда должен
+приезжать шифротекст, ключа от которого на relay нет.
+
+**Ключ.** Генерируется один раз, приватная половина не остаётся ни на одном
+сервере — иначе смысла в шифровании нет. Расшифровать копию нужно будет тогда,
+когда main уже не существует.
+
+```bash
+apt-get install -y age
+age-keygen -o /root/age-identity.txt
+grep '^# public key:' /root/age-identity.txt | sed 's/# public key: //' \
+  > /opt/obsidian/backup-recipient.pub
+```
+
+Заберите `/root/age-identity.txt` к себе (`scp`), проверьте, что файл дошёл, и
+**только потом** удалите его с сервера: `shred -u /root/age-identity.txt`.
+Держите не одну копию — потеряете ключ, и все отправленные архивы станут
+нечитаемым мусором.
+
+**Приёмник.** Отдельный непривилегированный пользователь и forced command:
+класть можно, читать и удалять нельзя. Захваченный main не вычитает то, что
+сам же отправил, и не сотрёт историю копий.
+
+```bash
+useradd -r -m -d /var/lib/obsbackup -s /bin/sh obsbackup
+install -d -o obsbackup -g obsbackup -m 700 \
+  /var/backups/obsidian-remote /var/lib/obsbackup/.ssh
+# сюда — публичный ключ из /opt/obsidian/.ssh/id_backup.pub, созданного ниже
+cat >> /var/lib/obsbackup/.ssh/authorized_keys <<'EOF'
+from="10.77.0.1",restrict,command="/usr/bin/rrsync -wo /var/backups/obsidian-remote" ssh-ed25519 AAAA... obsidian-backup-main
+EOF
+chown obsbackup: /var/lib/obsbackup/.ssh/authorized_keys
+chmod 600 /var/lib/obsbackup/.ssh/authorized_keys
+```
+
+**Если на приёмнике есть fail2ban — внесите сеть в исключения сразу.** Каждая
+отбитая forced command выглядит для `sshd` неудачным заходом, и в
+`mode = aggressive` этого хватает, чтобы забанить собственный main. Отправка
+тогда встаёт, а снаружи всё выглядит здоровым: `ping` проходит, `sshd` active,
+и причина видна только в правилах `nftables`.
+
+```bash
+cp fail2ban/obsidian-ignore.conf /etc/fail2ban/jail.d/
+systemctl reload fail2ban
+fail2ban-client get sshd ignoreip   # 10.77.0.0/24 обязан быть в списке
+```
+
+Ротация на приёмнике — своя: удалять по `rsync` оттуда нельзя, и это намеренно.
+
+```bash
+printf '#!/bin/sh\nls -1t /var/backups/obsidian-remote/*.age 2>/dev/null | tail -n +31 | xargs -r rm -f\n' \
+  > /usr/local/bin/obsidian-remote-rotate.sh
+chmod 755 /usr/local/bin/obsidian-remote-rotate.sh
+printf '17 1 * * * root /usr/local/bin/obsidian-remote-rotate.sh\n' \
+  > /etc/cron.d/obsidian-remote-rotate
+```
+
+**Отправитель.** Прав root не нужно: всё нужное доступно пользователю
+`obsidian`. Хост закрепляется заранее — принимать ключ на лету значило бы
+соглашаться с кем угодно, кто окажется на этом адресе.
+
+```bash
+install -d -o obsidian -g obsidian -m 700 \
+  /opt/obsidian/.ssh /var/backups/obsidian-outbox
+sudo -u obsidian ssh-keygen -q -t ed25519 -f /opt/obsidian/.ssh/id_backup -N '' \
+  -C obsidian-backup-main
+ssh-keyscan -H 10.77.0.3 > /opt/obsidian/.ssh/known_hosts
+chown obsidian: /opt/obsidian/.ssh/known_hosts
+
+install -m 755 obsidian-offsite.sh /usr/local/bin/obsidian-offsite.sh
+cp systemd/obsidian-offsite.service /etc/systemd/system/
+systemctl daemon-reload
+```
+
+Отправка привязана к снимку через `OnSuccess=` в `obsidian-backup.service`:
+отправлять нечего, пока снимок не снят. Проверка — под тем самым пользователем,
+до всякой автоматики:
+
+```bash
+sudo -u obsidian /usr/local/bin/obsidian-offsite.sh   # ждём «отправлено»
+systemctl start obsidian-backup.service
+systemctl show obsidian-backup.service obsidian-offsite.service -p Result
+```
+
+**И проверьте, что копия открывается вашим ключом.** Бэкап, который ни разу не
+открывали, — это надежда, а не бэкап. На своей машине, не на сервере:
+
+```bash
+scp <приёмник>:/var/backups/obsidian-remote/<файл> .
+age -d -i age-identity.txt -o proba.tar.zst <файл>
+tar -tf proba.tar.zst        # внутри обязан быть obsidian.db
+```
+
 ## 8. Обновление
 
 ```bash

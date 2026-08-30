@@ -1,0 +1,31 @@
+# /etc/systemd/system/obsidian-offsite.service
+#
+# Отправка снимка на второй узел. Запускается не таймером, а по успеху
+# obsidian-backup.service (OnSuccess=): отправлять нечего, пока снимок не снят.
+#
+# Отдельным юнитом, а не ExecStartPost внутри бэкапа, по двум причинам.
+# Во-первых, снимок и отправка — разные факты: упавшая отправка не должна
+# выглядеть как «бэкапа нет». Во-вторых, песочница у них разная — бэкапу
+# нужен доступ к базе, отправке к сети и ключам, и смешивать их права незачем.
+
+[Unit]
+Description=Obsidian offsite snapshot shipment
+After=obsidian-backup.service
+
+[Service]
+Type=oneshot
+User=obsidian
+Group=obsidian
+WorkingDirectory=/opt/obsidian
+# ssh ищет свои файлы относительно HOME, а ProtectHome его прячет.
+Environment=HOME=/opt/obsidian
+ExecStart=/usr/local/bin/obsidian-offsite.sh
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Единственное место, куда пишем: временный шифротекст перед отправкой.
+# Каталог должен существовать заранее — при ProtectSystem=strict создать его
+# на лету уже нельзя.
+ReadWritePaths=/var/backups/obsidian-outbox
