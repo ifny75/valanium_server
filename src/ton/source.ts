@@ -44,7 +44,7 @@ const PAGE = 16;
 /**
  * Прямой опрос блокчейна через ADNL: никаких сторонних HTTP-API, которые
  * решали бы за нас, оплачен ли счёт. Лайтсервер всё же видит, чей адрес мы
- * опрашиваем, — поэтому OBSIDIAN_TON_CONFIG стоит нацелить на свой узел.
+ * опрашиваем, — поэтому VALANIUM_TON_CONFIG стоит нацелить на свой узел.
  */
 export class LiteChainSource implements ChainSource {
   #client: LiteClient | null = null;

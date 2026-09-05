@@ -1,11 +1,11 @@
-# /etc/systemd/system/obsidian-backup.timer
+# /etc/systemd/system/valanium-backup.timer
 #
-#   sudo mkdir -p /var/backups/obsidian && sudo chown obsidian: /var/backups/obsidian
-#   sudo systemctl enable --now obsidian-backup.timer
-#   systemctl list-timers obsidian-backup
+#   sudo mkdir -p /var/backups/valanium && sudo chown valanium: /var/backups/valanium
+#   sudo systemctl enable --now valanium-backup.timer
+#   systemctl list-timers valanium-backup
 
 [Unit]
-Description=Obsidian daily backup
+Description=Valanium daily backup
 
 [Timer]
 OnCalendar=daily

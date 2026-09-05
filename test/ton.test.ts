@@ -4,7 +4,7 @@
  *
  * Платный вход сейчас выключен, а его пакеты лежат в optionalDependencies —
  * при установке с `--omit=optional` этот файл пропускается целиком, а не падает.
- * Логика при этом никуда не делась: включается обратно одним OBSIDIAN_TON_ADDRESS.
+ * Логика при этом никуда не делась: включается обратно одним VALANIUM_TON_ADDRESS.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -20,7 +20,7 @@ import { concat, fromHex, random, toHex } from "../src/util/bytes.ts";
 
 const PORT = 18787;
 const BASE = `http://127.0.0.1:${PORT}`;
-const dataDir = mkdtempSync(join(tmpdir(), "obsidian-smoke-"));
+const dataDir = mkdtempSync(join(tmpdir(), "valanium-smoke-"));
 const dbPath = join(dataDir, "smoke.db");
 
 /*
@@ -31,7 +31,7 @@ const dbPath = join(dataDir, "smoke.db");
 const issued = spawnSync(
   process.execPath,
   [join(import.meta.dirname, "..", "src", "tools", "invite.ts")],
-  { env: { ...process.env, OBSIDIAN_DB: dbPath }, encoding: "utf8" },
+  { env: { ...process.env, VALANIUM_DB: dbPath }, encoding: "utf8" },
 );
 if (issued.status !== 0) throw new Error(`invite CLI failed: ${issued.stderr}`);
 const inviteCode = /invite:\s*(\S+)/.exec(issued.stdout)?.[1];
@@ -40,9 +40,9 @@ assert.ok(inviteCode, `не разобрал вывод утилиты: ${issued
 const server = spawn(process.execPath, [join(import.meta.dirname, "..", "src", "index.ts")], {
   env: {
     ...process.env,
-    OBSIDIAN_PORT: String(PORT),
-    OBSIDIAN_DB: dbPath,
-    OBSIDIAN_BLOBS: join(dataDir, "blobs"),
+    VALANIUM_PORT: String(PORT),
+    VALANIUM_DB: dbPath,
+    VALANIUM_BLOBS: join(dataDir, "blobs"),
   },
   stdio: ["ignore", "pipe", "inherit"],
 });

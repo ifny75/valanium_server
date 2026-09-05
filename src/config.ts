@@ -30,31 +30,31 @@ function bool(name: string, fallback: boolean): boolean {
 const root = resolve(import.meta.dirname, "..");
 
 export const config = {
-  host: str("OBSIDIAN_HOST", "127.0.0.1"),
-  port: num("OBSIDIAN_PORT", 8787),
+  host: str("VALANIUM_HOST", "127.0.0.1"),
+  port: num("VALANIUM_PORT", 8787),
 
-  dbPath: resolve(root, str("OBSIDIAN_DB", "data/obsidian.db")),
-  blobDir: resolve(root, str("OBSIDIAN_BLOBS", "data/blobs")),
+  dbPath: resolve(root, str("VALANIUM_DB", "data/valanium.db")),
+  blobDir: resolve(root, str("VALANIUM_BLOBS", "data/blobs")),
 
   /** Больше — только через blob-эндпоинт. */
-  maxFrameBytes: num("OBSIDIAN_MAX_FRAME", 1024 * 1024),
+  maxFrameBytes: num("VALANIUM_MAX_FRAME", 1024 * 1024),
   /** Cloudflare free: тело запроса <= 100 MB. Держим запас. */
-  maxBlobBytes: num("OBSIDIAN_MAX_BLOB", 16 * 1024 * 1024),
+  maxBlobBytes: num("VALANIUM_MAX_BLOB", 16 * 1024 * 1024),
 
   /** Клиент обязан слать PING чаще: CF рвёт WS после ~100 с простоя. */
-  heartbeatSec: num("OBSIDIAN_HEARTBEAT_SEC", 30),
+  heartbeatSec: num("VALANIUM_HEARTBEAT_SEC", 30),
   /** uWS закроет сокет сам, если тишина дольше. */
-  idleTimeoutSec: num("OBSIDIAN_IDLE_TIMEOUT_SEC", 90),
+  idleTimeoutSec: num("VALANIUM_IDLE_TIMEOUT_SEC", 90),
 
-  envelopeTtlSec: num("OBSIDIAN_ENVELOPE_TTL_SEC", 14 * 24 * 3600),
-  blobTtlSec: num("OBSIDIAN_BLOB_TTL_SEC", 30 * 24 * 3600),
-  inviteTtlSec: num("OBSIDIAN_INVITE_TTL_SEC", 7 * 24 * 3600),
+  envelopeTtlSec: num("VALANIUM_ENVELOPE_TTL_SEC", 14 * 24 * 3600),
+  blobTtlSec: num("VALANIUM_BLOB_TTL_SEC", 30 * 24 * 3600),
+  inviteTtlSec: num("VALANIUM_INVITE_TTL_SEC", 7 * 24 * 3600),
   /** Открытая beta: новый аккаунт можно создать без инвайта и оплаты. */
-  publicRegistration: bool("OBSIDIAN_PUBLIC_REGISTRATION", false),
-  nonceTtlSec: num("OBSIDIAN_NONCE_TTL_SEC", 30),
+  publicRegistration: bool("VALANIUM_PUBLIC_REGISTRATION", false),
+  nonceTtlSec: num("VALANIUM_NONCE_TTL_SEC", 30),
 
-  maxAuthAttemptsPerConn: num("OBSIDIAN_MAX_AUTH_ATTEMPTS", 5),
-  maxAuthPerMinutePerIp: num("OBSIDIAN_MAX_AUTH_PER_MIN", 20),
+  maxAuthAttemptsPerConn: num("VALANIUM_MAX_AUTH_ATTEMPTS", 5),
+  maxAuthPerMinutePerIp: num("VALANIUM_MAX_AUTH_PER_MIN", 20),
 
   /**
    * Попыток восстановления по паролю в час — на IP и отдельно на логин.
@@ -63,13 +63,13 @@ export const config = {
    * между чужим человеком и личностью целиком. Своих попыток тут нужно
    * две-три, чужому — тысячи.
    */
-  maxRecoveryPerHour: num("OBSIDIAN_MAX_RECOVERY_PER_HOUR", 10),
+  maxRecoveryPerHour: num("VALANIUM_MAX_RECOVERY_PER_HOUR", 10),
 
   /**
    * Поисков по юзернейму в минуту на IP. Каталог хранит хеши, но словарь имён
    * невелик, и без ограничителя его перебрали бы целиком за вечер.
    */
-  maxSearchPerMinute: num("OBSIDIAN_MAX_SEARCH_PER_MIN", 20),
+  maxSearchPerMinute: num("VALANIUM_MAX_SEARCH_PER_MIN", 20),
   /**
    * Одновременных сокетов с одного адреса.
    *
@@ -78,7 +78,7 @@ export const config = {
    * От перебора это всё равно защищает: тысячу висящих сокетов с одной машины
    * больше не открыть.
    */
-  maxConnectionsPerIp: num("OBSIDIAN_MAX_CONNECTIONS_PER_IP", 32),
+  maxConnectionsPerIp: num("VALANIUM_MAX_CONNECTIONS_PER_IP", 32),
   /**
    * Сколько сокетов всего может висеть, не назвавшись.
    *
@@ -89,7 +89,7 @@ export const config = {
    * трогает вовсе, а новым в разгар атаки отвечает «занято» — что честнее,
    * чем упасть по памяти для всех сразу.
    */
-  maxUnauthenticatedConnections: num("OBSIDIAN_MAX_UNAUTH_CONNECTIONS", 4096),
+  maxUnauthenticatedConnections: num("VALANIUM_MAX_UNAUTH_CONNECTIONS", 4096),
   /**
    * Сколько соединений держит onion-вход целиком.
    *
@@ -98,7 +98,7 @@ export const config = {
    * пользователи Tor сразу, — но оно есть, иначе вход мимо Cloudflare остался
    * бы единственным местом без потолка вообще.
    */
-  maxOnionConnections: num("OBSIDIAN_MAX_ONION_CONNECTIONS", 512),
+  maxOnionConnections: num("VALANIUM_MAX_ONION_CONNECTIONS", 512),
   /**
    * Onion-адреса входных узлов: клиент узнаёт их в HELLO.
    *
@@ -107,7 +107,23 @@ export const config = {
    * свою же сеть и называет её сам; в клиенте остаётся только запасной адрес
    * на случай, когда до HELLO ещё не дошли.
    */
-  onionHosts: list("OBSIDIAN_ONION_HOSTS", []),
+  onionHosts: list("VALANIUM_ONION_HOSTS", []),
+  /**
+   * Подпись списка входов и время его выпуска.
+   *
+   * Сервер их только передаёт. Подписать список он не может — ключ офлайн, у
+   * владельца, и это не неудобство, а условие задачи: сервер, умеющий назвать
+   * любой onion-адрес, уводит режим Tor мимо Tor, и человек этого не заметит.
+   *
+   * Готовятся примером `sign_onion_hosts` из ядра, той же функцией, которой
+   * клиент проверяет. Пусто — новый клиент список не примет и останется на
+   * адресах из сборки; это правильное поведение, а не поломка.
+   *
+   * Порядок адресов в `VALANIUM_ONION_HOSTS` входит в подписанные байты:
+   * переставите — подпись перестанет сходиться.
+   */
+  onionSignature: str("VALANIUM_ONION_SIG", ""),
+  onionIssuedAt: num("VALANIUM_ONION_ISSUED_AT", 0),
   /**
    * Во сколько раз щедрее лимиты частоты для того же общего ведра.
    *
@@ -115,13 +131,13 @@ export const config = {
    * закрывает вход остальным, а перебор через Tor всё равно упирается в
    * счётчики на логин и на личность, которые считаются отдельно от входа.
    */
-  onionLimitFactor: num("OBSIDIAN_ONION_LIMIT_FACTOR", 20),
+  onionLimitFactor: num("VALANIUM_ONION_LIMIT_FACTOR", 20),
   /**
    * Потолки карт в памяти. Оба берутся с запасом: они спасают от исчерпания
    * памяти, а не ограничивают поведение — за это отвечают лимиты выше.
    */
-  maxRateLimitKeys: num("OBSIDIAN_MAX_RATE_KEYS", 100_000),
-  maxOutstandingNonces: num("OBSIDIAN_MAX_NONCES", 50_000),
+  maxRateLimitKeys: num("VALANIUM_MAX_RATE_KEYS", 100_000),
+  maxOutstandingNonces: num("VALANIUM_MAX_NONCES", 50_000),
   /**
    * Доверять ли `CF-Connecting-IP`.
    *
@@ -129,7 +145,7 @@ export const config = {
    * до сервера мимо туннеля. Поэтому он принимается только от петли: cloudflared
    * ходит с localhost. Появится другой обратный прокси — его адрес сюда.
    */
-  trustedProxies: list("OBSIDIAN_TRUSTED_PROXIES", ["127.0.0.1", "::1", "::ffff:127.0.0.1"]),
+  trustedProxies: list("VALANIUM_TRUSTED_PROXIES", ["127.0.0.1", "::1", "::ffff:127.0.0.1"]),
 
   /**
    * Отправка. До этого «сколько угодно и как быстро угодно» было единственной
@@ -139,31 +155,26 @@ export const config = {
    * столько не нужно даже в горячем споре, а скрипту этого мало, чтобы
    * навредить.
    */
-  maxSendPerMinute: num("OBSIDIAN_MAX_SEND_PER_MIN", 120),
+  maxSendPerMinute: num("VALANIUM_MAX_SEND_PER_MIN", 120),
   /**
    * Потолок очереди на устройство. Считается по получателю, а не по
    * отправителю: иначе десять аккаунтов сложатся и обойдут ограничение,
    * которое как раз получателя и защищает.
    */
-  maxQueuedPerDevice: num("OBSIDIAN_MAX_QUEUED_PER_DEVICE", 5000),
-  /**
-   * Тот же потолок, но в байтах.
-   *
-   * Считать очередь в штуках недостаточно: при `maxFrame` в мегабайт пять
-   * тысяч конвертов — это пять гигабайт на одно устройство, а устройств много.
-   * Упирается в такое не отправитель, а диск целиком, и вместе с ним ложится
-   * сервер для всех сразу.
-   *
-   * 256 МиБ выбраны по тому, сколько недоставленного бывает у живого человека,
-   * а не по тому, сколько влезет: сейчас средний конверт — четверть килобайта,
-   * и даже поток вложений по мегабайту упрётся в потолок только после сотен
-   * штук. Значит, честной переписке он не мешает, а залить им диск нельзя.
-   */
-  maxQueuedBytesPerDevice: num("OBSIDIAN_MAX_QUEUED_BYTES", 256 * 1024 * 1024),
-  /** Посты в каналах. У них, в отличие от конвертов, нет TTL — лежат всегда. */
-  maxPostsPerMinute: num("OBSIDIAN_MAX_POSTS_PER_MIN", 20),
+  maxQueuedPerDevice: num("VALANIUM_MAX_QUEUED_PER_DEVICE", 5000),
+  /** Активных устройств на одну identity. Отозванные tombstone сюда не входят. */
+  maxDevicesPerIdentity: num("VALANIUM_MAX_DEVICES_PER_IDENTITY", 8),
+  /** Байтов недоставленной очереди: отдельно на устройство и на identity. */
+  maxQueuedBytesPerDevice: num("VALANIUM_MAX_QUEUED_BYTES_PER_DEVICE", 256 * 1024 * 1024),
+  maxQueuedBytesPerIdentity: num("VALANIUM_MAX_QUEUED_BYTES_PER_IDENTITY", 512 * 1024 * 1024),
+  /** Посты в каналах: rate-limit не заменяет дисковую квоту. */
+  maxPostsPerMinute: num("VALANIUM_MAX_POSTS_PER_MIN", 20),
+  maxPostsPerChannel: num("VALANIUM_MAX_POSTS_PER_CHANNEL", 50_000),
+  maxChannelBytes: num("VALANIUM_MAX_CHANNEL_BYTES", 64 * 1024 * 1024),
+  /** Открытая лента — не бессрочный архив. */
+  channelPostTtlSec: num("VALANIUM_CHANNEL_POST_TTL_SEC", 90 * 24 * 3600),
   /** Каналов на личность. Их заведение ничего не стоит, а место занимает. */
-  maxChannelsPerIdentity: num("OBSIDIAN_MAX_CHANNELS", 20),
+  maxChannelsPerIdentity: num("VALANIUM_MAX_CHANNELS", 20),
   /**
    * Сколько чужих KeyPackages можно забрать за час.
    *
@@ -177,9 +188,9 @@ export const config = {
    * Живому человеку столько не нужно: пакет тратится один раз на нового
    * собеседника, а не на сообщение.
    */
-  maxClaimsPerHour: num("OBSIDIAN_MAX_CLAIMS_PER_HOUR", 60),
+  maxClaimsPerHour: num("VALANIUM_MAX_CLAIMS_PER_HOUR", 60),
   /** То же, но со стороны того, чей запас берут. */
-  maxClaimsPerDevicePerHour: num("OBSIDIAN_MAX_CLAIMS_PER_DEVICE_HOUR", 120),
+  maxClaimsPerDevicePerHour: num("VALANIUM_MAX_CLAIMS_PER_DEVICE_HOUR", 120),
 
   /**
    * Кто владеет сервером: список identity в hex через запятую.
@@ -189,42 +200,62 @@ export const config = {
    * ни у кого, и это правильное значение по умолчанию.
    */
   get admins(): string[] {
-    return str("OBSIDIAN_ADMINS", "")
+    return str("VALANIUM_ADMINS", "")
       .split(",")
       .map((entry) => entry.trim().toLowerCase())
       .filter((entry) => /^[0-9a-f]{64}$/.test(entry));
   },
 
-  cleanupIntervalSec: num("OBSIDIAN_CLEANUP_SEC", 3600),
+  cleanupIntervalSec: num("VALANIUM_CLEANUP_SEC", 3600),
 
   /**
    * Подписанный манифест релизов. Кладётся рядом с базой и обновляется
    * выкладкой; ключа для его подписи на сервере нет и быть не должно.
    */
-  releasesFile: resolve(root, str("OBSIDIAN_RELEASES_FILE", "data/releases.json")),
+  releasesFile: resolve(root, str("VALANIUM_RELEASES_FILE", "data/releases.json")),
 
   releases: {
-    windowsVersion: str("OBSIDIAN_WINDOWS_VERSION", "0.6.3"),
-    windowsUrl: str("OBSIDIAN_WINDOWS_URL", "https://getobsidian.xyz/downloads/Obsidian-Setup.exe"),
-    androidVersion: str("OBSIDIAN_ANDROID_VERSION", "0.5.6"),
-    androidUrl: str("OBSIDIAN_ANDROID_URL", "https://getobsidian.xyz/downloads/Obsidian.apk"),
+    windowsVersion: str("VALANIUM_WINDOWS_VERSION", "0.6.3"),
+    windowsUrl: str("VALANIUM_WINDOWS_URL", "https://valanium.com/downloads/Valanium-Setup.exe"),
+    androidVersion: str("VALANIUM_ANDROID_VERSION", "0.5.6"),
+    androidUrl: str("VALANIUM_ANDROID_URL", "https://valanium.com/downloads/Valanium.apk"),
+  },
+
+  /**
+   * Почта поддержки. Своя база и свой срок хранения — см. support/store.ts.
+   *
+   * Только приём. Отвечает владелец из своего ящика: Cloudflare Email Routing
+   * отправлять не умеет, а поднимать ради этого SMTP-провайдера со своим
+   * ключом, доменной подписью и репутацией — работа, несоразмерная паре писем
+   * в неделю. Копию каждого письма воркер пересылает на обычный ящик, оттуда
+   * и отвечают.
+   */
+  support: {
+    dbPath: resolve(root, str("VALANIUM_SUPPORT_DB", "data/support.db")),
+    /** Общий секрет с Cloudflare Email Worker: без него входящее не примем. */
+    inboundToken: str("VALANIUM_SUPPORT_INBOUND_TOKEN", ""),
+    address: str("VALANIUM_SUPPORT_ADDRESS", "support@valanium.com"),
+    /** Больше 512 КиБ — это не письмо в поддержку, а способ занять диск. */
+    maxBytes: num("VALANIUM_SUPPORT_MAX_BYTES", 512 * 1024),
+    /** Переписка полугодовой давности никому не нужна, а адрес всё лежит. */
+    ttlSec: num("VALANIUM_SUPPORT_TTL_SEC", 180 * 24 * 3600),
   },
 
   ton: {
     /** Пустой адрес => платный вход выключен, остаются только инвайты. */
-    address: str("OBSIDIAN_TON_ADDRESS", ""),
+    address: str("VALANIUM_TON_ADDRESS", ""),
     /**
      * Цена задаётся в TON, а не в долларах: курсовой оракул — это ещё одна
      * внешняя зависимость и ещё один наблюдатель. Админ пересчитывает сам.
      */
-    priceNano: tonToNano(str("OBSIDIAN_TON_PRICE", "3.0")),
+    priceNano: tonToNano(str("VALANIUM_TON_PRICE", "3.0")),
     /** Допуск на пересылочные комиссии и дробление, базисные пункты. */
-    toleranceBp: num("OBSIDIAN_TON_TOLERANCE_BP", 200),
+    toleranceBp: num("VALANIUM_TON_TOLERANCE_BP", 200),
     /** Сколько живёт выставленный счёт. */
-    invoiceTtlSec: num("OBSIDIAN_TON_INVOICE_TTL_SEC", 3600),
-    pollSec: num("OBSIDIAN_TON_POLL_SEC", 20),
+    invoiceTtlSec: num("VALANIUM_TON_INVOICE_TTL_SEC", 3600),
+    pollSec: num("VALANIUM_TON_POLL_SEC", 20),
     /** Свой лайтсервер = никто не видит, чей кошелёк мы опрашиваем. */
-    configUrl: str("OBSIDIAN_TON_CONFIG", "https://ton.org/global.config.json"),
+    configUrl: str("VALANIUM_TON_CONFIG", "https://ton.org/global.config.json"),
   },
 } as const;
 
@@ -232,7 +263,7 @@ export const config = {
 export function tonToNano(value: string): bigint {
   const trimmed = value.trim();
   if (!/^\d+(\.\d{1,9})?$/.test(trimmed)) {
-    throw new Error(`OBSIDIAN_TON_PRICE must be a decimal with <=9 fraction digits, got ${trimmed}`);
+    throw new Error(`VALANIUM_TON_PRICE must be a decimal with <=9 fraction digits, got ${trimmed}`);
   }
   const [whole = "0", fraction = ""] = trimmed.split(".");
   return BigInt(whole) * 1_000_000_000n + BigInt(fraction.padEnd(9, "0"));

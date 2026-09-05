@@ -19,8 +19,10 @@ import {
   type Deps,
 } from "./ws/session.ts";
 import { registerRoutes, removeBlobFile } from "./http/routes.ts";
+import { SupportStore } from "./support/store.ts";
 
 const store = new Store(config.dbPath);
+const support = new SupportStore(config.support.dbPath);
 const nonces = new NonceStore(config.nonceTtlSec, config.maxOutstandingNonces);
 const registry = new Registry();
 const authLimiter = new RateLimiter(config.maxAuthPerMinutePerIp, 60_000, config.maxRateLimitKeys);
@@ -33,7 +35,7 @@ const connections = new ConnectionCounter();
 const now = () => Date.now();
 
 const deps: Deps = {
-  store, nonces, registry,
+  store, support, nonces, registry,
   authLimiter, recoveryLimiter, searchLimiter, sendLimiter, postLimiter, claimLimiter,
   connections, now,
 };
@@ -74,11 +76,11 @@ app.ws<ConnData>("/ws", {
       приписывал бы свой трафик чужому адресу. Взамен все соединения из Tor
       делят один ключ и свои, отдельные потолки.
     */
-    const onion = isOnion(peer, req.getHeader("x-obsidian-route"), config.trustedProxies);
+    const onion = isOnion(peer, req.getHeader("x-valanium-route"), config.trustedProxies);
     // Жетон вместо адреса. Схлопывание IPv6 до /64 сделано на узле, до
     // хеширования: иначе владелец подсети получал бы новый жетон на каждый
     // адрес и обходил любой потолок, ни разу его не превысив.
-    const blinded = blindedClient(peer, req.getHeader("x-obsidian-client"), config.trustedProxies);
+    const blinded = blindedClient(peer, req.getHeader("x-valanium-client"), config.trustedProxies);
     const ip = onion
       ? ONION_KEY
       : blinded
@@ -106,14 +108,14 @@ app.ws<ConnData>("/ws", {
   },
 });
 
-registerRoutes(app);
+registerRoutes(app, support);
 
 // --- наблюдатель за оплатами -------------------------------------------------
 
 let paymentTimer: NodeJS.Timeout | null = null;
 
 /**
- * Платный вход выключен, пока не задан OBSIDIAN_TON_ADDRESS. Модули TON
+ * Платный вход выключен, пока не задан VALANIUM_TON_ADDRESS. Модули TON
  * грузятся динамически именно поэтому: при пустом адресе ни ton-lite-client,
  * ни @ton/core не нужны, и сервер поднимается с `npm ci --omit=optional`.
  * Сама логика проверки оплаты никуда не делась и покрыта тестами.
@@ -160,13 +162,14 @@ app.listen(config.host, config.port, (token) => {
     process.exit(1);
   }
   listenSocket = token;
-  log.info("obsidian-server up", { port: config.port, heartbeatSec: config.heartbeatSec });
+  log.info("valanium-server up", { port: config.port, heartbeatSec: config.heartbeatSec });
 });
 
 const cleanup = setInterval(() => {
   const ts = now();
   for (const id of store.expiredBlobs(ts)) removeBlobFile(id);
-  const swept = store.sweep(ts);
+  const swept = store.sweep(ts, ts - config.channelPostTtlSec * 1000);
+  support.sweep(ts - config.support.ttlSec * 1000);
   nonces.sweep(ts);
   authLimiter.sweep(ts);
   recoveryLimiter.sweep(ts);

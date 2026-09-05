@@ -1,6 +1,6 @@
-# obsidian-server
+# valanium-server
 
-Релей для Obsidian. Принимает шифротексты, раздаёт их адресатам и ничего о них не знает.
+Релей для Valanium. Принимает шифротексты, раздаёт их адресатам и ничего о них не знает.
 
 Архитектура и модель угроз — в [../ARCHITECTURE.md](../ARCHITECTURE.md). Wire-протокол там же, §7.
 
@@ -14,7 +14,7 @@ npm start
 
 Вход сейчас **только по инвайтам**. Платёжный шлюз на TON написан и покрыт тестами, но не
 загружается: его пакеты лежат в `optionalDependencies`, а модули подтягиваются динамически
-только при непустом `OBSIDIAN_TON_ADDRESS`. Совсем без них ставится так:
+только при непустом `VALANIUM_TON_ADDRESS`. Совсем без них ставится так:
 
 ```bash
 npm ci --ignore-scripts --omit=optional
@@ -55,13 +55,13 @@ Bearer-токенов сервер не выдаёт: выдавать их бы
 защищённые ими пути исчезли.
 
 Опкоды `PAY_REQUEST` / `PAY_INFO` / `PAY_OK` остаются в протоколе, но при пустом
-`OBSIDIAN_TON_ADDRESS` сервер отвечает на них ошибкой `payment_disabled`.
+`VALANIUM_TON_ADDRESS` сервер отвечает на них ошибкой `payment_disabled`.
 
 MLS KeyPackages ходят не по HTTP, а по сокету (`KEYPKG_PUBLISH` / `KEYPKG_CLAIM` / `KEYPKG`):
 отдельный HTTP-путь означал бы в клиентском ядре второй TLS-клиент ради двух запросов.
 HTTP-эндпоинты `/v1/keypackages` оставлены для отладки и инструментов.
 
-CORS-заголовков нет намеренно: ходить сюда должен `obsidian-core`, а не браузер.
+CORS-заголовков нет намеренно: ходить сюда должен `valanium-core`, а не браузер.
 
 ## Структура
 
@@ -87,17 +87,20 @@ src/
 
 ## Где остальное
 
-Obsidian разложен на четыре репозитория:
+Valanium разложен на репозитории:
 
 | Репозиторий | Что там | Лицензия |
 |---|---|---|
-| [obsidian](https://github.com/ifny75/obsidian) | ядро: криптография, MLS, протокол | AGPL-3.0 |
-| [obsidian_server](https://github.com/ifny75/obsidian_server) | сервер и конфиги узлов | AGPL-3.0 |
-| [obsidian_android](https://github.com/ifny75/obsidian_android) | клиент для Android | PolyForm Noncommercial 1.0.0 |
-| [obsidian_pc](https://github.com/ifny75/obsidian_pc) | клиент для Windows | PolyForm Noncommercial 1.0.0 |
+| [valanium_main](https://github.com/ifny75/valanium_main) | ядро: криптография, MLS, протокол | AGPL-3.0 |
+| [valanium_server](https://github.com/ifny75/valanium_server) | сервер и конфиги узлов | AGPL-3.0 |
+| [valanium_android](https://github.com/ifny75/valanium_android) | клиент для Android | PolyForm Noncommercial 1.0.0 |
+| [valanium_pc](https://github.com/ifny75/valanium_pc) | клиент для Windows | PolyForm Noncommercial 1.0.0 |
+| [valanium-onionize](https://github.com/valanium-project/valanium-onionize) | встроенный Tor для Onion | AGPL-3.0 |
 
 ## Лицензия
 
-**AGPL-3.0**, см. [LICENSE](LICENSE). Поднимайте у себя, меняйте, форкайте. Если запустите изменённую версию как сервис — исходники ваших правок должны быть доступны тем, кто им пользуется.
+**AGPL-3.0**, см. [LICENSE](LICENSE). Поднимайте у себя, меняйте, форкайте.
+Если запустите изменённую версию как сервис — исходники ваших правок должны
+быть доступны тем, кто им пользуется.
 
-Имя «Obsidian» лицензией не покрывается — см. [TRADEMARK.md](TRADEMARK.md).
+Имя «Valanium» лицензией не покрывается — см. [TRADEMARK.md](TRADEMARK.md).

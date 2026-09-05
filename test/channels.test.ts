@@ -12,6 +12,7 @@ import { sha256 } from "@noble/hashes/sha2";
 
 import { config } from "../src/config.ts";
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
@@ -57,6 +58,7 @@ class FakeSocket implements Socket {
 function makeDeps(store: Store): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30_000),
     registry: new Registry(),
     authLimiter: new RateLimiter(100, 60_000),
@@ -430,7 +432,11 @@ test("владелец меняет название и значок, читат
   assert.equal(updated.iconBase64, icon);
   // Имя канала не менялось: на нём держится ссылка.
   assert.equal(updated.handle, "notes");
-  assert.equal(reader.sock.json(OP.CHANNEL_OK).updated.title, "Тетрадь");
+  const readerUpdate = reader.sock.json(OP.CHANNEL_OK).updated;
+  assert.equal(readerUpdate.title, "Тетрадь");
+  assert.equal(readerUpdate.owner, false);
+  assert.equal(readerUpdate.role, "reader");
+  assert.equal(readerUpdate.admins, undefined);
 
   // Значок снимается явным null, а не отсутствием поля.
   owner.sock.clear();

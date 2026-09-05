@@ -5,7 +5,7 @@
  * проверить код, сервер должен знать то же самое, что знает телефон. Спрятать
  * его от самого сервера невозможно, и притворяться, что мы это умеем, не надо.
  *
- * Спрятать его от УТЕЧКИ БАЗЫ — можно, и это не мелочь: дамп `obsidian.db`
+ * Спрятать его от УТЕЧКИ БАЗЫ — можно, и это не мелочь: дамп `valanium.db`
  * уезжает с бэкапом, с диском, с копией для отладки, и уезжает целиком. Ключ
  * лежит отдельным файлом рядом, в бэкап базы не попадает, и без него утёкшая
  * таблица не отдаёт вторые факторы.
@@ -48,7 +48,7 @@ export class SecretBox {
     // ради тестов файл в рабочем каталоге было бы неопрятно и незаметно.
     if (dbPath === ":memory:") return new SecretBox(randomBytes(KEY_LEN));
 
-    const fromEnv = process.env.OBSIDIAN_SECRET_KEY;
+    const fromEnv = process.env.VALANIUM_SECRET_KEY;
     if (fromEnv !== undefined && fromEnv !== "") {
       return new SecretBox(Buffer.from(fromEnv, "hex"));
     }

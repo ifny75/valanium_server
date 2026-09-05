@@ -5,21 +5,30 @@ import { ascii, concat } from "../util/bytes.ts";
  * Доменные префиксы обязательны: без них подпись, снятая в одном контексте,
  * переиспользуется в другом (ARCHITECTURE.md §6).
  */
-const DOMAIN_AUTH = ascii("obsidian-auth-v1");
-const DOMAIN_DEVICE = ascii("obsidian-device-v1");
+const DOMAIN_AUTH = ascii("valanium-auth-v1");
+const DOMAIN_DEVICE = ascii("valanium-device-v1");
+const DOMAIN_REVOKE_OTHERS = ascii("valanium-device-revoke-others-v1");
 
-/** `sign(identity_priv, "obsidian-device-v1" || identity_pub || device_pub)` */
+/** `sign(identity_priv, "valanium-device-v1" || identity_pub || device_pub)` */
 export function deviceCertMessage(identityPub: Uint8Array, devicePub: Uint8Array): Uint8Array {
   return concat(DOMAIN_DEVICE, identityPub, devicePub);
 }
 
-/** `sign(device_priv, "obsidian-auth-v1" || nonce || identity_pub || device_pub)` */
+/** `sign(device_priv, "valanium-auth-v1" || nonce || identity_pub || device_pub)` */
 export function authMessage(
   nonce: Uint8Array,
   identityPub: Uint8Array,
   devicePub: Uint8Array,
 ): Uint8Array {
   return concat(DOMAIN_AUTH, nonce, identityPub, devicePub);
+}
+
+/** Доказательство identity-ключом: обычного ключа устройства для отзыва мало. */
+export function revokeOtherDevicesMessage(
+  identityPub: Uint8Array,
+  keepDevicePub: Uint8Array,
+): Uint8Array {
+  return concat(DOMAIN_REVOKE_OTHERS, identityPub, keepDevicePub);
 }
 
 /**

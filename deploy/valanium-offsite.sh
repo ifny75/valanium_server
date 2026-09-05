@@ -20,29 +20,29 @@
 # можно, читать и удалять нельзя. Ротацией занимается сам приёмник.
 #
 # Прав root не нужно и быть не должно: всё, что читается, и так доступно
-# пользователю `obsidian`, под которым идёт снимок. Юнит поэтому тоже
-# непривилегированный — см. systemd/obsidian-offsite.service.
+# пользователю `valanium`, под которым идёт снимок. Юнит поэтому тоже
+# непривилегированный — см. systemd/valanium-offsite.service.
 
 set -euo pipefail
 
-SNAPSHOTS=/var/backups/obsidian
-OUTBOX=/var/backups/obsidian-outbox
-RECIPIENT_FILE=/opt/obsidian/backup-recipient.pub
-SSH_KEY=/opt/obsidian/.ssh/id_backup
-KNOWN_HOSTS=/opt/obsidian/.ssh/known_hosts
+SNAPSHOTS=/var/backups/valanium
+OUTBOX=/var/backups/valanium-outbox
+RECIPIENT_FILE=/opt/valanium/backup-recipient.pub
+SSH_KEY=/opt/valanium/.ssh/id_backup
+KNOWN_HOSTS=/opt/valanium/.ssh/known_hosts
 REMOTE=obsbackup@10.77.0.3
 
 [ -s "$RECIPIENT_FILE" ] || { echo "нет публичного ключа: $RECIPIENT_FILE" >&2; exit 1; }
 [ -r "$SSH_KEY" ] || { echo "нет ключа доступа: $SSH_KEY" >&2; exit 1; }
 
 # Берём последний готовый снимок, а не делаем свой: VACUUM INTO уже отработал
-# в obsidian-backup.service, и второй проход стоил бы лишнего чтения базы.
+# в valanium-backup.service, и второй проход стоил бы лишнего чтения базы.
 newest=$(ls -1 "$SNAPSHOTS" 2>/dev/null | sort | tail -1)
 [ -n "$newest" ] || { echo "снимков нет в $SNAPSHOTS" >&2; exit 1; }
 
 mkdir -p "$OUTBOX"
 chmod 700 "$OUTBOX"
-archive="$OUTBOX/obsidian-$newest.tar.zst.age"
+archive="$OUTBOX/valanium-$newest.tar.zst.age"
 
 # Чистим за собой при любом исходе: незашифрованного здесь не остаётся никогда,
 # а место на main не расходуется впустую.

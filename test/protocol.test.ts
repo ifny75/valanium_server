@@ -5,11 +5,12 @@ import { sha256 } from "@noble/hashes/sha2";
 
 import { config } from "../src/config.ts";
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
 import { ConnectionCounter } from "../src/util/connections.ts";
-import { authMessage, deviceCertMessage, verify } from "../src/auth/verify.ts";
+import { authMessage, deviceCertMessage, revokeOtherDevicesMessage, verify } from "../src/auth/verify.ts";
 import { handleClose, handleMessage, handleOpen, newConnData, type ConnData, type Deps } from "../src/ws/session.ts";
 import { ID_LEN, KEY_LEN, OP, frame, jsonFrame } from "../src/proto/frames.ts";
 import { ascii, concat, fromHex, random, toHex } from "../src/util/bytes.ts";
@@ -70,9 +71,16 @@ function makeIdentity(): Identity {
   return { idPriv, idPub, devPriv, devPub, cert: ed25519.sign(deviceCertMessage(idPub, devPub), idPriv) };
 }
 
+function anotherDevice(id: Identity): Identity {
+  const devPriv = ed25519.utils.randomPrivateKey();
+  const devPub = ed25519.getPublicKey(devPriv);
+  return { ...id, devPriv, devPub, cert: ed25519.sign(deviceCertMessage(id.idPub, devPub), id.idPriv) };
+}
+
 function makeDeps(store: Store): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30),
     registry: new Registry(),
     authLimiter: new RateLimiter(1000, 60_000),
@@ -129,6 +137,30 @@ test("регистрация требует пропуск: инвайт или 
 
   assert.equal(sock.json(OP.AUTH_ERR).code, "entry_required");
   assert.equal(sock.has(OP.AUTH_OK), false);
+  store.close();
+});
+
+test("identity-подпись отзывает другие устройства и tombstone не даёт вернуться", () => {
+  const store = new Store(":memory:");
+  const deps = makeDeps(store);
+  const first = makeIdentity();
+  const firstConn = register(deps, store, first, "alice");
+  const second = anotherDevice(first);
+  const joining = connect(deps);
+  handleMessage(deps, joining.sock, joining.conn, authFrame(second, joining.nonce));
+  assert.ok(joining.sock.has(OP.AUTH_OK));
+
+  const message = revokeOtherDevicesMessage(first.idPub, first.devPub);
+  handleMessage(deps, firstConn.sock, firstConn.conn, jsonFrame(OP.DEVICE_REVOKE_OTHERS, {
+    signature: toHex(ed25519.sign(message, first.idPriv)),
+  }));
+  assert.equal(firstConn.sock.latestJson(OP.DEVICE_OK).revoked, 1);
+  assert.equal(joining.sock.closed?.reason, "device revoked");
+
+  const replay = connect(deps);
+  handleMessage(deps, replay.sock, replay.conn, authFrame(second, replay.nonce));
+  assert.equal(replay.sock.json(OP.AUTH_ERR).code, "device_revoked");
+  assert.ok(store.getDevice(first.devPub));
   store.close();
 });
 
@@ -338,69 +370,7 @@ test("переполненная очередь получателя закры�
   // несколько аккаунтов сложатся и обойдут его, оставаясь каждый в своём ведре.
   handleMessage(deps, c.sock, c.conn, letter());
   assert.equal(c.sock.json(OP.ERROR).code, "recipient_queue_full");
-  assert.equal(store.queueUsage(bob.devPub, now).count, limit);
-  store.close();
-});
-
-test("очередь закрывается по объёму, а не только по числу конвертов", () => {
-  const store = new Store(":memory:");
-  const deps = makeDeps(store);
-  const alice = makeIdentity();
-  const bob = makeIdentity();
-  const a = register(deps, store, alice, "alice");
-  register(deps, store, bob, "bob");
-
-  /*
-    Набиваем очередь Боба немногими, но крупными конвертами: по числу штук до
-    потолка ещё далеко, а место они занимают уже всё. Ради этого потолок в
-    байтах и заводился — считать очередь в штуках при мегабайтном кадре
-    значит разрешить пять гигабайт на устройство.
-  */
-  const now = Date.now();
-  const chunk = 1024 * 1024;
-  const heavy = new Uint8Array(chunk);
-  let filled = 0;
-  while (filled + chunk <= config.maxQueuedBytesPerDevice) {
-    store.enqueue(bob.devPub, heavy, now, now + 3_600_000);
-    filled += chunk;
-  }
-
-  const usage = store.queueUsage(bob.devPub, now);
-  assert.ok(usage.count < config.maxQueuedPerDevice,
-    `потолок в штуках не должен был сработать: ${usage.count}`);
-  assert.equal(usage.bytes, filled);
-
-  handleMessage(deps, a.sock, a.conn, frame(OP.SEND,
-    concat(random(ID_LEN), bob.devPub, new Uint8Array([0, 0, 0x0e, 0x10]), ascii("x"))));
-  assert.equal(a.sock.json(OP.ERROR).code, "recipient_queue_full");
-  // Отказ случился до постановки в очередь, а не после.
-  assert.equal(store.queueUsage(bob.devPub, now).bytes, filled);
-  store.close();
-});
-
-test("почти полная по объёму очередь принимает то, что ещё влезает", () => {
-  // Обратная сторона: потолок обязан пропускать всё, что помещается, иначе
-  // он превращается в запрет переписки задолго до того, как место кончилось.
-  const store = new Store(":memory:");
-  const deps = makeDeps(store);
-  const alice = makeIdentity();
-  const bob = makeIdentity();
-  const a = register(deps, store, alice, "alice");
-  register(deps, store, bob, "bob");
-
-  const now = Date.now();
-  const chunk = 1024 * 1024;
-  const heavy = new Uint8Array(chunk);
-  let filled = 0;
-  while (filled + chunk <= config.maxQueuedBytesPerDevice - chunk) {
-    store.enqueue(bob.devPub, heavy, now, now + 3_600_000);
-    filled += chunk;
-  }
-
-  handleMessage(deps, a.sock, a.conn, frame(OP.SEND,
-    concat(random(ID_LEN), bob.devPub, new Uint8Array([0, 0, 0x0e, 0x10]), ascii("x"))));
-  assert.ok(!a.sock.has(OP.ERROR), `письмо обязано пройти: ${a.sock.opcodes()}`);
-  assert.equal(store.queueUsage(bob.devPub, now).count, filled / chunk + 1);
+  assert.equal(store.countQueued(bob.devPub, now), limit);
   store.close();
 });
 

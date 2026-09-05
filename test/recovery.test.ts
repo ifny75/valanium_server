@@ -5,6 +5,7 @@ import { sha256 } from "@noble/hashes/sha2";
 
 import { codeFor, encodeBase32, STEP_SECONDS } from "../src/auth/totp.ts";
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
@@ -17,13 +18,13 @@ import { ascii, concat, fromHex, random, toHex } from "../src/util/bytes.ts";
 /**
  * Восстановление по логину и паролю — серверная половина.
  *
- * Криптография живёт в obsidian-core/src/passphrase.rs и покрыта там. Здесь
+ * Криптография живёт в valanium-core/src/passphrase.rs и покрыта там. Здесь
  * важно другое: сервер не должен превращаться в оракул. Он не рассказывает,
  * какие логины заняты, не отдаёт посылку без доказательства и не даёт затереть
  * чужую строку.
  */
 
-const VERIFIER_DOMAIN = ascii("obsidian-recovery-verifier-v1");
+const VERIFIER_DOMAIN = ascii("valanium-recovery-verifier-v1");
 
 class FakeSocket implements Socket {
   readonly sent: Uint8Array[] = [];
@@ -80,6 +81,7 @@ function makeIdentity(): Identity {
 function makeDeps(store: Store, recoveryLimit = 1000): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30),
     registry: new Registry(),
     authLimiter: new RateLimiter(1000, 60_000),

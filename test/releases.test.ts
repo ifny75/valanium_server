@@ -18,7 +18,7 @@ test("манифест подписывается и проверяется то
 
   const manifest = JSON.stringify({
     v: 1,
-    windows: { version: "0.11.0", url: "https://getobsidian.xyz/downloads/x.exe", sha256: "ab".repeat(32) },
+    windows: { version: "0.11.0", url: "https://valanium.com/downloads/x.exe", sha256: "ab".repeat(32) },
   });
   const signature = ed25519.sign(Buffer.from(manifest, "utf8"), priv);
 
@@ -36,13 +36,13 @@ test("манифест подписывается и проверяется то
 });
 
 test("файл манифеста читается с диска как есть", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "obsidian-rel-"));
+  const dir = mkdtempSync(join(tmpdir(), "valanium-rel-"));
   try {
     const payload = { manifest: '{"v":1}', signature: "ab".repeat(64) };
     const file = join(dir, "releases.json");
     writeFileSync(file, JSON.stringify(payload));
 
-    process.env.OBSIDIAN_RELEASES_FILE = file;
+    process.env.VALANIUM_RELEASES_FILE = file;
     // Конфиг читается один раз при импорте, поэтому проверяем сам файл:
     // задача сервера — отдать эти две строки, ничего в них не меняя.
     const { readFileSync } = await import("node:fs");
@@ -50,7 +50,7 @@ test("файл манифеста читается с диска как есть
     assert.equal(back.manifest, payload.manifest);
     assert.equal(back.signature, payload.signature);
   } finally {
-    delete process.env.OBSIDIAN_RELEASES_FILE;
+    delete process.env.VALANIUM_RELEASES_FILE;
     rmSync(dir, { recursive: true, force: true });
   }
 });

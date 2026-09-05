@@ -2,7 +2,7 @@
  * Секрет одноразовых кодов в базе.
  *
  * Проверять надо не «шифруется ли» в отрыве, а то, ради чего это делалось: что
- * дамп `obsidian.db` не отдаёт вторые факторы, что старая база переезжает сама
+ * дамп `valanium.db` не отдаёт вторые факторы, что старая база переезжает сама
  * и что без ключа второй фактор не обходится, а перестаёт проходить.
  */
 import { test } from "node:test";
@@ -22,7 +22,7 @@ const SECRET = new Uint8Array([
 ]);
 
 function scratch(): { dir: string; db: string } {
-  const dir = mkdtempSync(join(tmpdir(), "obsidian-box-"));
+  const dir = mkdtempSync(join(tmpdir(), "valanium-box-"));
   return { dir, db: join(dir, "test.db") };
 }
 

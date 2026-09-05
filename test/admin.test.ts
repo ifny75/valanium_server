@@ -11,6 +11,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { sha256 } from "@noble/hashes/sha2";
 
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
@@ -52,6 +53,7 @@ class FakeSocket implements Socket {
 function makeDeps(store: Store): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30_000),
     registry: new Registry(),
     authLimiter: new RateLimiter(100, 60_000),
@@ -101,7 +103,7 @@ test("панель открывается по ключу личности, а �
   const store = new Store(":memory:");
   const deps = makeDeps(store);
   const owner = makeIdentity();
-  process.env.OBSIDIAN_ADMINS = toHex(owner.idPub);
+  process.env.VALANIUM_ADMINS = toHex(owner.idPub);
 
   const o = connect(deps, store, owner, "owner");
   assert.equal(o.sock.json(OP.AUTH_OK).admin, true);
@@ -112,14 +114,14 @@ test("панель открывается по ключу личности, а �
   assert.equal(stats.counts.users, 1);
   assert.ok(stats.counts.queued === 0, "очередь пуста на пустом сервере");
 
-  process.env.OBSIDIAN_ADMINS = "";
+  process.env.VALANIUM_ADMINS = "";
   store.close();
 });
 
 test("постороннему панель неотличима от несуществующей", () => {
   const store = new Store(":memory:");
   const deps = makeDeps(store);
-  process.env.OBSIDIAN_ADMINS = toHex(makeIdentity().idPub);
+  process.env.VALANIUM_ADMINS = toHex(makeIdentity().idPub);
 
   const guest = connect(deps, store, makeIdentity(), "guest");
   assert.equal(guest.sock.json(OP.AUTH_OK).admin, false);
@@ -129,7 +131,7 @@ test("постороннему панель неотличима от несущ
   assert.equal(guest.sock.has(OP.ADMIN_OK), false, "чужому статистику отдавать нельзя");
   assert.equal(guest.sock.json(OP.ERROR).code, "unknown_request");
 
-  process.env.OBSIDIAN_ADMINS = "";
+  process.env.VALANIUM_ADMINS = "";
   store.close();
 });
 
@@ -138,7 +140,7 @@ test("заблокированного не пускают, владельца �
   const deps = makeDeps(store);
   const owner = makeIdentity();
   const guest = makeIdentity();
-  process.env.OBSIDIAN_ADMINS = toHex(owner.idPub);
+  process.env.VALANIUM_ADMINS = toHex(owner.idPub);
 
   const g = connect(deps, store, guest, "guest");
   assert.ok(g.sock.has(OP.AUTH_OK));
@@ -172,7 +174,7 @@ test("заблокированного не пускают, владельца �
   const back = connect(deps, store, guest, "guest");
   assert.ok(back.sock.has(OP.AUTH_OK), "разблокированный должен снова входить");
 
-  process.env.OBSIDIAN_ADMINS = "";
+  process.env.VALANIUM_ADMINS = "";
   store.close();
 });
 
@@ -181,7 +183,7 @@ test("список аккаунтов показывает то, что серв
   const deps = makeDeps(store);
   const owner = makeIdentity();
   const guest = makeIdentity();
-  process.env.OBSIDIAN_ADMINS = toHex(owner.idPub);
+  process.env.VALANIUM_ADMINS = toHex(owner.idPub);
 
   connect(deps, store, guest, "guest");
   const o = connect(deps, store, owner, "owner");
@@ -201,7 +203,7 @@ test("список аккаунтов показывает то, что серв
   assert.equal("username" in row, false);
   assert.equal(row.hasUsername, false);
 
-  process.env.OBSIDIAN_ADMINS = "";
+  process.env.VALANIUM_ADMINS = "";
   store.close();
 });
 

@@ -11,6 +11,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { sha256 } from "@noble/hashes/sha2";
 
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
@@ -55,6 +56,7 @@ class FakeSocket implements Socket {
 function makeDeps(store: Store): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30_000),
     registry: new Registry(),
     authLimiter: new RateLimiter(100, 60_000),
@@ -103,7 +105,7 @@ function register(deps: Deps, store: Store, id: ReturnType<typeof makeIdentity>,
 }
 
 /** Хеш считает владелец пропуска; сервер получает только его. */
-const hashOf = (pass: Uint8Array) => toHex(sha256(concat(ascii("obsidian-pass-v1"), pass)));
+const hashOf = (pass: Uint8Array) => toHex(sha256(concat(ascii("valanium-pass-v1"), pass)));
 
 function sendFrame(recipient: Uint8Array) {
   const header = concat(random(ID_LEN), recipient, new Uint8Array([0, 0, 14, 16]));

@@ -33,7 +33,7 @@ CREATE TABLE usernames (
 `;
 
 function scratch(): { dir: string; db: string } {
-  const dir = mkdtempSync(join(tmpdir(), "obsidian-migrate-"));
+  const dir = mkdtempSync(join(tmpdir(), "valanium-migrate-"));
   return { dir, db: join(dir, "old.db") };
 }
 

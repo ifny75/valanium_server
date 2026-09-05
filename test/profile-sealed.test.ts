@@ -11,6 +11,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { sha256 } from "@noble/hashes/sha2";
 
 import { Store } from "../src/db/index.ts";
+import { SupportStore } from "../src/support/store.ts";
 import { NonceStore } from "../src/auth/nonce.ts";
 import { Registry, type Socket } from "../src/ws/registry.ts";
 import { RateLimiter } from "../src/util/ratelimit.ts";
@@ -20,7 +21,7 @@ import { handleMessage, handleOpen, newConnData, type Deps } from "../src/ws/ses
 import { OP, jsonFrame } from "../src/proto/frames.ts";
 import { ascii, fromHex, random, toHex } from "../src/util/bytes.ts";
 
-const SEALED = "application/vnd.obsidian.sealed-avatar";
+const SEALED = "application/vnd.valanium.sealed-avatar";
 
 class FakeSocket implements Socket {
   readonly sent: Uint8Array[] = [];
@@ -54,6 +55,7 @@ class FakeSocket implements Socket {
 function makeDeps(store: Store): Deps {
   return {
     store,
+    support: new SupportStore(":memory:"),
     nonces: new NonceStore(30_000),
     registry: new Registry(),
     authLimiter: new RateLimiter(100, 60_000),

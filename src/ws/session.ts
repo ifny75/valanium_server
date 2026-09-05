@@ -2,8 +2,9 @@ import { sha256 } from "@noble/hashes/sha2";
 import { config, PROTOCOL_VERSION } from "../config.ts";
 import { log } from "../log.ts";
 import type { Store } from "../db/index.ts";
+import type { SupportStore } from "../support/store.ts";
 import type { NonceStore } from "../auth/nonce.ts";
-import { authMessage, deviceCertMessage, verify } from "../auth/verify.ts";
+import { authMessage, deviceCertMessage, revokeOtherDevicesMessage, verify } from "../auth/verify.ts";
 import type { RateLimiter } from "../util/ratelimit.ts";
 import { decodeBase32, verify as verifyTotp } from "../auth/totp.ts";
 import type { ConnectionCounter } from "../util/connections.ts";
@@ -41,6 +42,7 @@ const REF_LEN = 10;
 
 export interface Deps {
   store: Store;
+  support: SupportStore;
   nonces: NonceStore;
   registry: Registry;
   authLimiter: RateLimiter;
@@ -142,7 +144,15 @@ export function handleOpen(deps: Deps, sock: Socket, conn: ConnData): void {
       // Входы, о которых клиент иначе не узнает. Пустой список — просто нет
       // onion-входа: старый клиент поля не заметит, новый останется на своём
       // запасном адресе.
+      //
+      // Подпись сюда только передаётся. Считать её сервер не может и не должен:
+      // ключ офлайн, у владельца. В этом весь смысл — сервер, умеющий подписать
+      // список, увёл бы режим Tor куда угодно, а клиент бы не заметил.
+      // Без подписи новый клиент список не примет; порядок адресов входит в
+      // подписанные байты, поэтому отдаём их ровно как заданы.
       onion: config.onionHosts,
+      onionSig: config.onionSignature,
+      onionIssuedAt: config.onionIssuedAt,
     }),
     true,
   );
@@ -273,6 +283,18 @@ export function handleMessage(deps: Deps, sock: Socket, conn: ConnData, msg: Uin
       case OP.CHANNEL_ADMIN:
         requireAuth(conn);
         onChannelAdmin(deps, sock, conn, body);
+        return;
+      case OP.DEVICE_REVOKE_OTHERS:
+        requireAuth(conn);
+        onDeviceRevokeOthers(deps, sock, conn, body);
+        return;
+      case OP.SUPPORT_GET:
+        requireAuth(conn);
+        onSupportGet(deps, sock, conn, body);
+        return;
+      case OP.SUPPORT_MARK:
+        requireAuth(conn);
+        onSupportMark(deps, sock, conn, body);
         return;
       case OP.CHANNEL_DELETE_POST:
         requireAuth(conn);
@@ -508,10 +530,14 @@ function onAuth(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
   const now = deps.now();
   const { identity, devicePub, cert } = creds;
 
-  const existing = deps.store.getDevice(devicePub);
+  const existing = deps.store.getDeviceRecord(devicePub);
   if (existing && !constantTimeEqual(existing.identity, identity)) {
     // Один device key не может кочевать между личностями.
     authFail(deps, sock, conn, "device_conflict", "device bound to another identity");
+    return;
+  }
+  if (existing?.revoked_at !== null && existing?.revoked_at !== undefined) {
+    authFail(deps, sock, conn, "device_revoked", "device has been revoked");
     return;
   }
 
@@ -524,6 +550,10 @@ function onAuth(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
 
   if (!deps.store.userExists(identity) && !admit(deps, sock, conn, payload, identity, now)) return;
 
+  if (!existing && deps.store.countActiveDevices(identity) >= config.maxDevicesPerIdentity) {
+    authFail(deps, sock, conn, "device_limit", "too many devices; revoke an old device first");
+    return;
+  }
   const deviceId = existing ? existing.id : deps.store.createDevice(identity, devicePub, cert, now);
   deps.store.touchDevice(devicePub, now);
 
@@ -579,7 +609,7 @@ const MAX_AVATAR_BYTES = 256 * 1024;
  * никакого формата снаружи нет. Остаётся ограничение размера, и его хватает:
  * блоб всё равно нельзя отдать браузеру как картинку.
  */
-const SEALED_AVATAR_MIME = "application/vnd.obsidian.sealed-avatar";
+const SEALED_AVATAR_MIME = "application/vnd.valanium.sealed-avatar";
 const AVATAR_MIMES = new Set([
   "image/jpeg", "image/png", "image/webp", SEALED_AVATAR_MIME,
 ]);
@@ -800,7 +830,7 @@ function onPassPresent(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Arra
   const pass = fromHex(payload.pass, PASS_LEN);
   const now = deps.now();
 
-  const owner = deps.store.redeemPass(sha256(concat(ascii("obsidian-pass-v1"), pass)), now);
+  const owner = deps.store.redeemPass(sha256(concat(ascii("valanium-pass-v1"), pass)), now);
   const device = deps.store.getDevice(recipient);
   const admitted = owner !== undefined && device !== undefined
     && constantTimeEqual(device.identity, owner);
@@ -887,6 +917,20 @@ function onUsernameLookup(deps: Deps, sock: Socket, conn: ConnData, body: Uint8A
     color: profile.color,
     decor: profile.decor ? Buffer.from(profile.decor).toString("base64") : null,
   }), true);
+}
+
+// --- устройства ---------------------------------------------------------------
+
+function onDeviceRevokeOthers(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  const payload = parseJsonBody(body) as { signature?: unknown };
+  const signature = fromHex(payload?.signature, SIG_LEN);
+  if (!verify(signature, revokeOtherDevicesMessage(conn.identity!, conn.devicePub!), conn.identity!)) {
+    sock.send(errorFrame("bad_signature", "identity signature rejected"), true);
+    return;
+  }
+  const revoked = deps.store.revokeOtherDevices(conn.identity!, conn.devicePub!, deps.now());
+  for (const device of revoked) deps.registry.disconnect(toHex(device));
+  sock.send(jsonFrame(OP.DEVICE_OK, { revoked: revoked.length }), true);
 }
 
 // --- каналы -------------------------------------------------------------------
@@ -1029,8 +1073,6 @@ function onChannelPublish(deps: Deps, sock: Socket, conn: ConnData, body: Uint8A
   const text = String(payload.body ?? "").trim();
   if (text.length === 0 || text.length > MAX_POST) throw new BadInput("bad post body");
 
-  // Пост живёт вечно: TTL, как у конвертов, у него нет. Значит частота —
-  // единственное, что стоит между лентой и бесконечным ростом диска.
   if (!deps.postLimiter.allow(toHex(conn.identity!), deps.now())) {
     sock.send(errorFrame("post_rate_limited", "slow down"), true);
     return;
@@ -1045,6 +1087,13 @@ function onChannelPublish(deps: Deps, sock: Socket, conn: ConnData, body: Uint8A
     нашего. Порядок ленты всё равно задаёт seq, а не это поле.
   */
   const now = deps.now();
+  const cutoff = now - config.channelPostTtlSec * 1000;
+  const usage = deps.store.channelPostUsage(channel.id, cutoff);
+  const postBytes = Buffer.byteLength(text, "utf8");
+  if (usage.count >= config.maxPostsPerChannel || usage.bytes + postBytes > config.maxChannelBytes) {
+    sock.send(errorFrame("channel_storage_full", "channel retention quota reached"), true);
+    return;
+  }
   const postId = payload.id === undefined ? random(ID_LEN) : fromHex(payload.id, ID_LEN);
   const createdAt = typeof payload.createdAt === "number" ? payload.createdAt : now;
   if (Math.abs(createdAt - now) > POST_TIME_WINDOW_MS) {
@@ -1084,7 +1133,9 @@ function onChannelFeed(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Arra
   if (!channel) return;
   const before = typeof payload.before === "number" && Number.isFinite(payload.before)
     ? Math.floor(payload.before) : null;
-  const posts = deps.store.posts(channel.id, FEED_PAGE + 1, before);
+  const posts = deps.store.posts(
+    channel.id, FEED_PAGE + 1, before, deps.now() - config.channelPostTtlSec * 1000,
+  );
 
   sock.send(jsonFrame(OP.CHANNEL_OK, {
     channel: channelView(deps, channel, conn.identity!),
@@ -1226,9 +1277,9 @@ function onChannelUpdate(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Ar
   deps.store.updateChannel(channel.id, patch, deps.now());
   const updated = deps.store.channelById(channel.id)!;
   // Читателям — новое состояние: у них в списке висит прежнее название.
-  const view = jsonFrame(OP.CHANNEL_OK, { updated: channelView(deps, updated, updated.owner) });
-  for (const device of deps.store.channelReaderDevices(channel.id, conn.identity!)) {
-    deps.registry.deliver(toHex(device), view);
+  for (const reader of deps.store.channelReaders(channel.id, conn.identity!)) {
+    const view = jsonFrame(OP.CHANNEL_OK, { updated: channelView(deps, updated, reader.identity) });
+    deps.registry.deliver(toHex(reader.device_pub), view);
   }
   sock.send(jsonFrame(OP.CHANNEL_OK, {
     updated: channelView(deps, updated, conn.identity!),
@@ -1360,12 +1411,97 @@ function onAdminAction(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Arra
   }), true);
 }
 
+const SUPPORT_PAGE = 40;
+/** Переписку читают целиком, но не бесконечно: очень длинная режется. */
+const SUPPORT_THREAD_LIMIT = 200;
+
+/**
+ * Список переписок либо одна переписка целиком.
+ *
+ * Адрес человека уезжает в панель открытым, и иначе нельзя: без него отвечать
+ * некому. Именно поэтому доступ сюда — только владельческий, тот же
+ * `requireAdmin`, что и у списка учёток.
+ */
+function onSupportGet(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  if (!requireAdmin(sock, conn)) return;
+  const payload = (body.byteLength > 0 ? parseJsonBody(body) : {}) as
+    { offset?: unknown; thread?: unknown };
+
+  if (typeof payload?.thread === "string") {
+    const id = fromHex(payload.thread, ID_LEN);
+    const thread = deps.support.thread(id);
+    if (!thread) {
+      sock.send(errorFrame("support_not_found", "no such thread"), true);
+      return;
+    }
+    deps.support.markRead(id);
+    sock.send(jsonFrame(OP.SUPPORT_OK, {
+      thread: supportThreadView({ ...thread, unread: 0 }),
+      messages: deps.support.messages(id, SUPPORT_THREAD_LIMIT).reverse().map((row) => ({
+        id: toHex(row.id),
+        subject: row.subject,
+        body: row.body,
+        createdAt: row.created_at,
+      })),
+      unreadThreads: deps.support.unreadCount(),
+    }), true);
+    return;
+  }
+
+  const offset = typeof payload?.offset === "number" && Number.isFinite(payload.offset)
+    ? Math.max(0, Math.floor(payload.offset))
+    : 0;
+  sock.send(jsonFrame(OP.SUPPORT_OK, supportList(deps, offset)), true);
+}
+
+function supportThreadView(row: {
+  id: Uint8Array; address: string; subject: string;
+  created_at: number; updated_at: number; unread: number; closed: number;
+}): Record<string, unknown> {
+  return {
+    id: toHex(row.id),
+    address: row.address,
+    subject: row.subject,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    unread: row.unread,
+    closed: row.closed > 0,
+  };
+}
+
+function supportList(deps: Deps, offset: number): Record<string, unknown> {
+  const rows = deps.support.threads(SUPPORT_PAGE + 1, offset);
+  return {
+    offset,
+    more: rows.length > SUPPORT_PAGE,
+    unreadThreads: deps.support.unreadCount(),
+    threads: rows.slice(0, SUPPORT_PAGE).map(supportThreadView),
+  };
+}
+
+function onSupportMark(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  if (!requireAdmin(sock, conn)) return;
+  const payload = parseJsonBody(body) as { thread?: unknown; closed?: unknown };
+  if (typeof payload?.thread !== "string") {
+    sock.send(errorFrame("bad_input", "thread required"), true);
+    return;
+  }
+  const id = fromHex(payload.thread, ID_LEN);
+  if (!deps.support.thread(id)) {
+    sock.send(errorFrame("support_not_found", "no such thread"), true);
+    return;
+  }
+  if (typeof payload.closed === "boolean") deps.support.setClosed(id, payload.closed);
+  else deps.support.markRead(id);
+  sock.send(jsonFrame(OP.SUPPORT_OK, supportList(deps, 0)), true);
+}
+
 const STARTED_AT = Date.now();
 
 // --- восстановление по логину и паролю ----------------------------------------
 
-/** Тот же домен, что в obsidian-core/src/passphrase.rs. Расхождение = отказ входа. */
-const RECOVERY_VERIFIER_DOMAIN = ascii("obsidian-recovery-verifier-v1");
+/** Тот же домен, что в valanium-core/src/passphrase.rs. Расхождение = отказ входа. */
+const RECOVERY_VERIFIER_DOMAIN = ascii("valanium-recovery-verifier-v1");
 const RECOVERY_ID_LEN = 32;
 const RECOVERY_VERIFIER_LEN = 32;
 const RECOVERY_TOKEN_LEN = 32;
@@ -1569,16 +1705,16 @@ function onSend(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
   // Потолок очереди получателя. Ведро отправителя его не заменяет: десять
   // аккаунтов в пределах своих вёдер сложатся и всё равно зальют одного
   // человека, а разгребать очередь ему.
-  //
-  // Потолков два, и второй не про получателя, а про сервер: в штуках очередь
-  // мерить мало, потому что пять тысяч конвертов по мегабайту — это пять
-  // гигабайт на одно устройство. Ответ у обоих один и тот же намеренно —
-  // отправителю незачем знать, в какой именно предел он уткнулся, а нам
-  // незачем подсказывать, каким размером кадра его обходить.
-  const queue = deps.store.queueUsage(parsed.recipientDevice, now);
-  if (queue.count >= config.maxQueuedPerDevice
-      || queue.bytes + parsed.ciphertext.length > config.maxQueuedBytesPerDevice) {
+  if (deps.store.countQueued(parsed.recipientDevice, now) >= config.maxQueuedPerDevice) {
     sock.send(errorFrame("recipient_queue_full", "recipient has too much undelivered mail"), true);
+    return;
+  }
+  const payloadBytes = parsed.ciphertext.byteLength;
+  if (deps.store.queuedBytes(parsed.recipientDevice, now) + payloadBytes
+      > config.maxQueuedBytesPerDevice
+      || deps.store.queuedBytesForIdentity(recipient.identity, now) + payloadBytes
+      > config.maxQueuedBytesPerIdentity) {
+    sock.send(errorFrame("recipient_queue_full", "recipient storage quota reached"), true);
     return;
   }
 

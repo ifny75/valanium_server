@@ -82,10 +82,10 @@ test("испорченный base32 отвергается, а не угадыв
 });
 
 test("ссылка для QR содержит всё, что нужно приложению", () => {
-  const url = otpauthUrl(RFC_SECRET, "obsidian:alice");
-  assert.match(url, /^otpauth:\/\/totp\/Obsidian:obsidian%3Aalice\?/);
+  const url = otpauthUrl(RFC_SECRET, "valanium:alice");
+  assert.match(url, /^otpauth:\/\/totp\/Valanium:valanium%3Aalice\?/);
   assert.match(url, /secret=[A-Z2-7]+/);
-  assert.match(url, /issuer=Obsidian/);
+  assert.match(url, /issuer=Valanium/);
   assert.match(url, /digits=6/);
   assert.match(url, /period=30/);
 });

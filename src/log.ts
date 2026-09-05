@@ -8,7 +8,7 @@ const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 } as const;
 type Level = keyof typeof LEVELS;
 
 const threshold: number =
-  LEVELS[(process.env["OBSIDIAN_LOG"] as Level | undefined) ?? "info"] ?? LEVELS.info;
+  LEVELS[(process.env["VALANIUM_LOG"] as Level | undefined) ?? "info"] ?? LEVELS.info;
 
 function emit(level: Level, msg: string, fields?: Record<string, number | boolean | string>) {
   if (LEVELS[level] > threshold) return;

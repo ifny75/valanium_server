@@ -1,6 +1,6 @@
 /**
  * Снимок состояния сервера:
- *   npm run backup -- /var/backups/obsidian
+ *   npm run backup -- /var/backups/valanium
  *
  * Обычным `cp` базу копировать нельзя: она в режиме WAL, и файл, снятый во
  * время записи, окажется битым или потеряет последние транзакции. `VACUUM INTO`
@@ -29,7 +29,7 @@ if (!target) {
 }
 
 /** Сколько снимков держать. Старые удаляются, иначе диск кончится молча. */
-const KEEP = Number(process.env["OBSIDIAN_BACKUP_KEEP"] ?? 14);
+const KEEP = Number(process.env["VALANIUM_BACKUP_KEEP"] ?? 14);
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const dir = join(target, stamp);
@@ -39,7 +39,7 @@ mkdirSync(dir, { recursive: true });
 
 const db = new DatabaseSync(config.dbPath);
 try {
-  const snapshot = join(dir, "obsidian.db").replaceAll("'", "''");
+  const snapshot = join(dir, "valanium.db").replaceAll("'", "''");
   db.exec(`VACUUM INTO '${snapshot}'`);
 } finally {
   db.close();

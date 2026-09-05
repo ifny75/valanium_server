@@ -1,4 +1,4 @@
-# /etc/systemd/system/obsidian-backup.service
+# /etc/systemd/system/valanium-backup.service
 #
 # Снимок базы. Обычный cp здесь не годится: база в режиме WAL, и файл, снятый
 # во время записи, окажется битым. Инструмент делает VACUUM INTO — консистентный
@@ -6,30 +6,30 @@
 #
 # Путь к node указан явно и намеренно не системный: серверу нужен 24+, а
 # системный обычно старее. systemd ищет ExecStart без подстановки PATH, и
-# промах виден только в журнале — этот юнит уже падал так двое суток подряд,
-# пока никто не смотрел. Ставите node в другое место — правьте здесь.
+# промах виден только в журнале — таймер бэкапа уже падал так двое суток
+# подряд, пока никто не смотрел. Ставите node в другое место — правьте здесь.
 
 [Unit]
-Description=Obsidian backup snapshot
-After=obsidian.service
+Description=Valanium backup snapshot
+After=valanium.service
 
 # Снимок сделан — отправляем копию наружу. Именно OnSuccess, а не Wants:
 # отправлять нечего, если снимок не удался, и незачем поднимать шум дважды
 # об одной и той же поломке.
-OnSuccess=obsidian-offsite.service
+OnSuccess=valanium-offsite.service
 
 [Service]
 Type=oneshot
-User=obsidian
-Group=obsidian
-WorkingDirectory=/opt/obsidian
-ExecStart=/opt/node-24/bin/node --env-file-if-exists=.env src/tools/backup.ts /var/backups/obsidian
+User=valanium
+Group=valanium
+WorkingDirectory=/opt/valanium
+ExecStart=/opt/node-24/bin/node --env-file-if-exists=.env src/tools/backup.ts /var/backups/valanium
 
 # Сколько снимков держать. Старые чистятся сами.
-Environment=OBSIDIAN_BACKUP_KEEP=14
+Environment=VALANIUM_BACKUP_KEEP=14
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/obsidian/data /var/backups/obsidian
+ReadWritePaths=/opt/valanium/data /var/backups/valanium

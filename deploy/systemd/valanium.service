@@ -1,26 +1,26 @@
-# /etc/systemd/system/obsidian.service
+# /etc/systemd/system/valanium.service
 #
 # Ужато намеренно: мессенджер не должен иметь доступа ни к чему, кроме своей
 # базы. Если сервер когда-нибудь скомпрометируют, ограничения ниже — это то,
 # что помешает превратить его в плацдарм.
 
 [Unit]
-Description=Obsidian messenger relay
+Description=Valanium messenger relay
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=obsidian
-Group=obsidian
-WorkingDirectory=/opt/obsidian
+User=valanium
+Group=valanium
+WorkingDirectory=/opt/valanium
 ExecStart=/opt/node-24/bin/node --env-file-if-exists=.env src/index.ts
 
 Restart=always
 RestartSec=5
 
 # Логи без идентификаторов — см. ARCHITECTURE.md §13.
-Environment=OBSIDIAN_LOG=info
+Environment=VALANIUM_LOG=info
 StandardOutput=journal
 StandardError=journal
 
@@ -37,7 +37,7 @@ RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=false
 # Единственное место, куда разрешено писать.
-ReadWritePaths=/opt/obsidian/data
+ReadWritePaths=/opt/valanium/data
 
 [Install]
 WantedBy=multi-user.target

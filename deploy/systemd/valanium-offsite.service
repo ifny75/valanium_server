@@ -1,7 +1,7 @@
-# /etc/systemd/system/obsidian-offsite.service
+# /etc/systemd/system/valanium-offsite.service
 #
 # Отправка снимка на второй узел. Запускается не таймером, а по успеху
-# obsidian-backup.service (OnSuccess=): отправлять нечего, пока снимок не снят.
+# valanium-backup.service (OnSuccess=): отправлять нечего, пока снимок не снят.
 #
 # Отдельным юнитом, а не ExecStartPost внутри бэкапа, по двум причинам.
 # Во-первых, снимок и отправка — разные факты: упавшая отправка не должна
@@ -9,17 +9,17 @@
 # нужен доступ к базе, отправке к сети и ключам, и смешивать их права незачем.
 
 [Unit]
-Description=Obsidian offsite snapshot shipment
-After=obsidian-backup.service
+Description=Valanium offsite snapshot shipment
+After=valanium-backup.service
 
 [Service]
 Type=oneshot
-User=obsidian
-Group=obsidian
-WorkingDirectory=/opt/obsidian
+User=valanium
+Group=valanium
+WorkingDirectory=/opt/valanium
 # ssh ищет свои файлы относительно HOME, а ProtectHome его прячет.
-Environment=HOME=/opt/obsidian
-ExecStart=/usr/local/bin/obsidian-offsite.sh
+Environment=HOME=/opt/valanium
+ExecStart=/usr/local/bin/valanium-offsite.sh
 
 NoNewPrivileges=true
 PrivateTmp=true
@@ -28,4 +28,4 @@ ProtectHome=true
 # Единственное место, куда пишем: временный шифротекст перед отправкой.
 # Каталог должен существовать заранее — при ProtectSystem=strict создать его
 # на лету уже нельзя.
-ReadWritePaths=/var/backups/obsidian-outbox
+ReadWritePaths=/var/backups/valanium-outbox

@@ -122,7 +122,7 @@ export function verify(secret: Uint8Array, code: string, now: number): boolean {
 }
 
 /** Ссылка для QR-кода. Формат задан приложениями, не нами. */
-export function otpauthUrl(secret: Uint8Array, label: string, issuer = "Obsidian"): string {
+export function otpauthUrl(secret: Uint8Array, label: string, issuer = "Valanium"): string {
   const encode = encodeURIComponent;
   return `otpauth://totp/${encode(issuer)}:${encode(label)}`
     + `?secret=${encodeBase32(secret)}`
