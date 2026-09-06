@@ -70,4 +70,12 @@ rsync -q --timeout=120 \
   -e "ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=15 -o UserKnownHostsFile=$KNOWN_HOSTS" \
   "$archive" "$REMOTE:"
 
+# Отметка об успехе. Прочитать приёмник мы не можем — канал туда
+# односторонний намеренно, — поэтому единственный способ узнать, что копия
+# уехала, это записать факт здесь. Самопроверка смотрит на свежесть этой
+# отметки: без неё «отправка встала» неотличимо от «всё хорошо».
+MARK=/opt/valanium/data/offsite
+mkdir -p "$MARK"
+: > "$MARK/last"
+
 echo "отправлено: $(basename "$archive") ($((size / 1024)) КБ) -> $REMOTE"

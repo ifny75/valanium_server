@@ -28,4 +28,6 @@ ProtectHome=true
 # Единственное место, куда пишем: временный шифротекст перед отправкой.
 # Каталог должен существовать заранее — при ProtectSystem=strict создать его
 # на лету уже нельзя.
-ReadWritePaths=/var/backups/valanium-outbox
+# Плюс отметка об успешной отправке: по её свежести самопроверка узнаёт,
+# что копия действительно уехала.
+ReadWritePaths=/var/backups/valanium-outbox /opt/valanium/data/offsite
