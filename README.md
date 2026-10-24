@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="valanium_server.png" alt="Valanium server" width="100%" />
+  
+
 # valanium-server
 
 Релей для Valanium. Принимает шифротексты, раздаёт их адресатам и ничего о них не знает.
