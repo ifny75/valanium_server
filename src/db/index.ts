@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 
 import { refuseToLoseDatabase } from "./guard.ts";
 import { chmodSync, mkdirSync } from "node:fs";
@@ -94,7 +95,10 @@ export class Store {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.#db = new DatabaseSync(path);
     this.#db.exec("PRAGMA journal_mode = WAL");
-    this.#db.exec("PRAGMA synchronous = NORMAL");
+    // SEND_OK must survive a power loss; clear freed SQLite cells on deletion.
+    this.#db.exec("PRAGMA synchronous = FULL");
+    this.#db.exec("PRAGMA secure_delete = ON");
+    this.#db.exec("PRAGMA journal_size_limit = 0");
     this.#db.exec("PRAGMA foreign_keys = ON");
     this.#dropLegacyEnvelopes();
     this.#db.exec(SCHEMA);
@@ -359,6 +363,42 @@ export class Store {
         .prepare("UPDATE devices SET revoked_at = ? WHERE identity = ? AND device_pub <> ? AND revoked_at IS NULL")
         .run(now, identity, keepDevice);
       return rows.map((row) => row.device_pub);
+    });
+  }
+
+  /**
+   * Отзыв одного выбранного устройства.
+   *
+   * Отдельно от `revokeOtherDevices` не ради удобства: то — аварийное «выйти
+   * везде, кроме этого», применяемое, когда телефон потерян и разбираться
+   * некогда. Обычное управление сессиями выглядит иначе: человек видит список
+   * и убирает из него одну строку.
+   *
+   * Своё текущее устройство отозвать нельзя. Не из вежливости: отозвав его,
+   * человек в ту же секунду теряет и сам список, и возможность отозвать
+   * что-либо ещё — а выглядит это как «приложение сломалось». Выход из
+   * приложения — отдельное действие, и делается оно не здесь.
+   *
+   * Возвращает, нашлось ли что отзывать. `false` — устройство уже отозвано
+   * либо принадлежит не этой личности; различать их наружу не надо, ответ
+   * человеку в обоих случаях один.
+   */
+  revokeDevice(identity: Bytes, devicePub: Bytes, now: number): boolean {
+    return this.#tx(() => {
+      const found = this.#db
+        .prepare("SELECT 1 FROM devices WHERE identity = ? AND device_pub = ? AND revoked_at IS NULL")
+        .get(identity, devicePub);
+      if (!found) return false;
+
+      // Очереди и ключевые пакеты уходят вместе с устройством: конверт,
+      // лежащий для отозванного, ему уже не отдадут, а ключевой пакет иначе
+      // позволил бы завести с ним беседу заново.
+      this.#db.prepare("DELETE FROM envelopes WHERE recipient_device = ?").run(devicePub);
+      this.#db.prepare("DELETE FROM key_packages WHERE device_pub = ?").run(devicePub);
+      this.#db
+        .prepare("UPDATE devices SET revoked_at = ? WHERE identity = ? AND device_pub = ?")
+        .run(now, identity, devicePub);
+      return true;
     });
   }
 
@@ -1017,6 +1057,27 @@ export class Store {
     return id;
   }
 
+  retryDigest(recipientDevice: Bytes, clientRef: Bytes, payload: Bytes): Buffer {
+    return createHash("sha256").update("valanium-envelope-retry-v1\0")
+      .update(recipientDevice).update(clientRef).update(payload).digest();
+  }
+
+  acceptedRetry(digest: Bytes, now: number): Bytes | undefined {
+    return (this.#db.prepare("SELECT envelope_id FROM envelope_retries WHERE digest = ? AND expires_at > ?")
+      .get(digest, now) as { envelope_id: Bytes } | undefined)?.envelope_id;
+  }
+
+  enqueueOnce(digest: Bytes, recipientDevice: Bytes, payload: Bytes, now: number, expiresAt: number): Bytes {
+    return this.#tx(() => {
+      const existing = this.acceptedRetry(digest, now);
+      if (existing) return existing;
+      const id = this.enqueue(recipientDevice, payload, now, expiresAt);
+      this.#db.prepare("INSERT OR REPLACE INTO envelope_retries (digest, envelope_id, expires_at) VALUES (?, ?, ?)")
+        .run(digest, id, expiresAt);
+      return id;
+    });
+  }
+
   /**
    * Сколько конвертов ждёт это устройство.
    *
@@ -1213,6 +1274,7 @@ export class Store {
     return this.#tx(() => ({
       payments: Number(this.#db.prepare("DELETE FROM payments WHERE expires_at <= ?").run(now).changes),
       envelopes: Number(this.#db.prepare("DELETE FROM envelopes WHERE expires_at <= ?").run(now).changes),
+      retries: Number(this.#db.prepare("DELETE FROM envelope_retries WHERE expires_at <= ?").run(now).changes),
       invites: Number(this.#db.prepare("DELETE FROM invites WHERE expires_at <= ?").run(now).changes),
       passes: Number(this.#db.prepare("DELETE FROM passes WHERE expires_at <= ?").run(now).changes),
       blobs: Number(this.#db.prepare("DELETE FROM blobs WHERE expires_at <= ?").run(now).changes),

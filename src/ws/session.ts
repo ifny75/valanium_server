@@ -4,10 +4,12 @@ import { log } from "../log.ts";
 import type { Store } from "../db/index.ts";
 import type { SupportStore } from "../support/store.ts";
 import type { NonceStore } from "../auth/nonce.ts";
-import { authMessage, deviceCertMessage, revokeOtherDevicesMessage, verify } from "../auth/verify.ts";
+import { authMessage, deviceCertMessage, revokeDeviceMessage,
+  revokeOtherDevicesMessage, verify } from "../auth/verify.ts";
 import type { RateLimiter } from "../util/ratelimit.ts";
 import { decodeBase32, verify as verifyTotp } from "../auth/totp.ts";
 import type { ConnectionCounter } from "../util/connections.ts";
+import type { TicketStore } from "../auth/tickets.ts";
 import { BadInput, ascii, concat, constantTimeEqual, fromHex, random, toHex } from "../util/bytes.ts";
 import {
   CLOSE,
@@ -26,7 +28,10 @@ import {
   parseKeyPackageClaim,
   parseKeyPackages,
   parseSend,
+  parseSendAnon,
+  parseTicketRequest,
   sendOkFrame,
+  ticketGrantFrame,
 } from "../proto/frames.ts";
 import type { Registry } from "./registry.ts";
 import type { Socket } from "./registry.ts";
@@ -52,6 +57,9 @@ export interface Deps {
   postLimiter: RateLimiter;
   /** Выдача чужих KeyPackages: считается и по берущему, и по тому, у кого берут. */
   claimLimiter: RateLimiter;
+  /** Выпуск sealed-sender билетов: тоже по личности — сама отправка уже нет. */
+  ticketLimiter: RateLimiter;
+  tickets: TicketStore;
   connections: ConnectionCounter;
   now: () => number;
 }
@@ -74,18 +82,22 @@ export interface ConnData {
    * отсутствия которой всё и затевалось.
    */
   admitted: Set<string>;
+  /** Queue batch awaiting ACK; transient and bounded by DRAIN_BATCH. */
+  queueInflight: Set<string>;
   /** Учтён ли этот сокет в счётчике адреса. Снимается ровно один раз. */
   counted: boolean;
   /** Числится ли он ещё среди неназвавшихся. Тоже снимается ровно один раз. */
   anonymous: boolean;
   /** Пришло ли соединение через onion-вход: у него свои потолки. */
   onion: boolean;
+  passAttempts: number;
 }
 
 export function newConnData(ip: string, onion = false): ConnData {
   return {
     ip,
     onion,
+    passAttempts: 0,
     authAttempts: 0,
     nonce: null,
     identity: null,
@@ -93,6 +105,7 @@ export function newConnData(ip: string, onion = false): ConnData {
     devicePubHex: null,
     paymentRef: null,
     admitted: new Set(),
+    queueInflight: new Set(),
     counted: false,
     anonymous: false,
   };
@@ -140,7 +153,28 @@ export function handleOpen(deps: Deps, sock: Socket, conn: ConnData): void {
       maxFrame: config.maxFrameBytes,
       /** Клиент сразу знает, какие способы входа доступны. */
       entry: { invite: !config.publicRegistration, ton: config.ton.address !== "" },
-      features: { profiles: true, recovery: true, usernames: true, passes: true, decor: true },
+      /*
+        Что сервер умеет. Спрашивают об этом заранее не из вежливости: неизвестный
+        код кадра здесь закрывает соединение (см. `default` в разборе), поэтому
+        клиент, пробующий новинку наугад, на старом сервере просто перестал бы
+        работать. Свои узлы люди обновляют когда захотят — значит старые серверы
+        есть и будут.
+
+        `devices` — выдача собственного списка устройств: он нужен клиенту, чтобы
+        разослать его собеседникам по шифрованному каналу.
+      */
+      features: {
+        profiles: true, recovery: true, usernames: true, passes: true, decor: true,
+        devices: true,
+        /**
+         * Билеты на анонимную отправку (`TICKET_REQUEST`/`SEND_ANON`). Спрашивать
+         * заранее нужно по той же причине, что и для остальных полей `features`:
+         * `SEND_ANON` на сервере, который о нём не знает, — это неизвестный
+         * опкод, а он закрывает соединение.
+         */
+        sealedSender: true,
+        sealedSenderPasses: true,
+      },
       // Входы, о которых клиент иначе не узнает. Пустой список — просто нет
       // onion-входа: старый клиент поля не заметит, новый останется на своём
       // запасном адресе.
@@ -202,7 +236,7 @@ export function handleMessage(deps: Deps, sock: Socket, conn: ConnData, msg: Uin
         return;
       case OP.ACK:
         requireAuth(conn);
-        onAck(deps, conn, body);
+        onAck(deps, sock, conn, body);
         return;
       case OP.KEYPKG_PUBLISH:
         requireAuth(conn);
@@ -237,7 +271,10 @@ export function handleMessage(deps: Deps, sock: Socket, conn: ConnData, msg: Uin
         onPassRevoke(deps, sock, conn, body);
         return;
       case OP.PASS_PRESENT:
-        requireAuth(conn);
+        if (!conn.identity) {
+          if (!conn.onion) { requireAuth(conn); }
+          if (++conn.passAttempts > 1) throw new BadInput("one anonymous pass presentation per connection");
+        }
         onPassPresent(deps, sock, conn, body);
         return;
       case OP.USERNAME_SET:
@@ -284,6 +321,14 @@ export function handleMessage(deps: Deps, sock: Socket, conn: ConnData, msg: Uin
         requireAuth(conn);
         onChannelAdmin(deps, sock, conn, body);
         return;
+      case OP.DEVICE_LIST:
+        requireAuth(conn);
+        onDeviceList(deps, sock, conn);
+        return;
+      case OP.DEVICE_REVOKE:
+        requireAuth(conn);
+        onDeviceRevoke(deps, sock, conn, body);
+        return;
       case OP.DEVICE_REVOKE_OTHERS:
         requireAuth(conn);
         onDeviceRevokeOthers(deps, sock, conn, body);
@@ -313,6 +358,17 @@ export function handleMessage(deps: Deps, sock: Socket, conn: ConnData, msg: Uin
         // подписаться нечем. Взамен — жёсткий ограничитель частоты и
         // доказательство знания пароля.
         onRecoveryGet(deps, sock, conn, body);
+        return;
+      case OP.TICKET_REQUEST:
+        requireAuth(conn);
+        onTicketRequest(deps, sock, conn, body);
+        return;
+      case OP.SEND_ANON:
+        // Второй кадр без requireAuth, и намеренно: личность тут заменяет
+        // билет, а не сессия. Соединение, посылающее его, никогда не
+        // проходит AUTH — свяжутся ли когда-нибудь эти два факта, зависит
+        // только от того, открыл ли клиент для этого отдельное соединение.
+        onSendAnon(deps, sock, conn, body);
         return;
       default:
         sock.end(CLOSE.PROTOCOL, "unknown opcode");
@@ -594,7 +650,7 @@ function onAuth(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
 
   sendProfile(sock, deps.store.ensureProfile(identity, now), devicePub);
 
-  drainQueue(deps, sock, devicePub, now);
+  drainQueue(deps, sock, conn, now);
 }
 
 const CHAT_CODE_RE = /^OBS-[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
@@ -931,6 +987,67 @@ function onDeviceRevokeOthers(deps: Deps, sock: Socket, conn: ConnData, body: Ui
   const revoked = deps.store.revokeOtherDevices(conn.identity!, conn.devicePub!, deps.now());
   for (const device of revoked) deps.registry.disconnect(toHex(device));
   sock.send(jsonFrame(OP.DEVICE_OK, { revoked: revoked.length }), true);
+}
+
+/*
+  Свои собственные устройства.
+
+  Личность берётся из сессии, а не из тела запроса: спросить чужой список
+  этим кадром нельзя в принципе, называть в нём нечего. Это и есть причина,
+  по которой такой ответ безопасен, тогда как тот же список в ответе на поиск
+  — нет: там спрашивающий посторонний, здесь — сам владелец.
+
+  Сертификаты едут вместе с ключами. Свои же они и подписаны своим ключом
+  личности, так что клиент проверяет их сам и не обязан верить нам на слово —
+  а дальше пересылает проверенный список собеседникам по шифрованному каналу,
+  где сервер уже ничего не решает.
+*/
+/*
+  Отзыв одного выбранного устройства.
+
+  Отдельно от «выйти на всех прочих» потому, что это разные действия. То —
+  аварийное: телефон потерян, разбираться некогда, убрать всё. Это —
+  обычное управление сессиями: человек видит список и убирает одну строку.
+  Одним «выйти везде» второе не заменяется, иначе за отключение старого
+  ноутбука человек платит перезаходом со всех устройств сразу.
+
+  Подпись ставит ключ **личности**, и домен у неё свой. Ключа устройства
+  недостаточно: устройство, отзывающее соседей, — это ровно то, чем занят
+  укравший одно из них.
+*/
+function onDeviceRevoke(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  const payload = parseJsonBody(body) as { device?: unknown; signature?: unknown };
+  const devicePub = fromHex(payload?.device, KEY_LEN);
+  const signature = fromHex(payload?.signature, SIG_LEN);
+
+  if (!verify(signature, revokeDeviceMessage(conn.identity!, devicePub), conn.identity!)) {
+    sock.send(errorFrame("bad_signature", "identity signature rejected"), true);
+    return;
+  }
+  // Своё текущее — нет. Отозвав его, человек в ту же секунду теряет и список,
+  // и возможность отозвать что-либо ещё, а выглядит это как поломка.
+  if (toHex(devicePub) === toHex(conn.devicePub!)) {
+    sock.send(errorFrame("bad_device", "cannot revoke the current device"), true);
+    return;
+  }
+
+  const revoked = deps.store.revokeDevice(conn.identity!, devicePub, deps.now());
+  if (revoked) deps.registry.disconnect(toHex(devicePub));
+  sock.send(jsonFrame(OP.DEVICE_OK, { revoked: revoked ? 1 : 0 }), true);
+}
+
+function onDeviceList(deps: Deps, sock: Socket, conn: ConnData): void {
+  const devices = deps.store.listDevices(conn.identity!);
+  sock.send(jsonFrame(OP.DEVICE_OK, {
+    identity: toHex(conn.identity!),
+    devices: devices.map((row) => ({
+      device: toHex(row.device_pub),
+      cert: toHex(row.cert),
+      // Когда устройство завели. Единственное, чем человек отличит одно от
+      // другого: имени у устройства нет, а ключ ему ничего не говорит.
+      addedAt: row.created_at,
+    })),
+  }), true);
 }
 
 // --- каналы -------------------------------------------------------------------
@@ -1726,19 +1843,118 @@ function onSend(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): voi
     return;
   }
 
-  const ttlSec = Math.min(parsed.ttlSec, config.envelopeTtlSec);
-  // Копия обязательна: parsed.* — это view в буфер uWS.
-  const payload = parsed.ciphertext.slice();
-  const envelopeId = deps.store.enqueue(parsed.recipientDevice, payload, now, now + ttlSec * 1000);
-
-  sock.send(sendOkFrame(parsed.clientRef, envelopeId), true);
-  deps.registry.deliver(toHex(parsed.recipientDevice), envelopeFrame(envelopeId, now, payload));
+  enqueueAndRespond(
+    deps, sock, parsed.recipientDevice, recipient.identity,
+    parsed.clientRef, parsed.ttlSec, parsed.ciphertext, now,
+  );
 }
 
-function onAck(deps: Deps, conn: ConnData, body: Uint8Array): void {
+/**
+ * Sealed sender: то же самое, что `SEND`, но соединение никогда не проходило
+ * `AUTH` — вместо подписи сессии предъявлен билет (`tickets.ts`). Личности
+ * здесь взять неоткуда, и это не упущение, а вся суть механизма.
+ */
+function onSendAnon(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  const now = deps.now();
+  const parsed = parseSendAnon(body);
+
+  // Причины отказа сознательно неразличимы снаружи: подделывающему билет
+  // не за чем знать, чего именно он не угадал.
+  if (!deps.tickets.redeem(parsed.ticket, now)) {
+    sock.send(errorFrame("bad_ticket", "ticket invalid, expired, or already used"), true);
+    return;
+  }
+
+  const recipient = deps.store.getDevice(parsed.recipientDevice);
+  if (!recipient) {
+    sock.send(errorFrame("unknown_recipient", "no such device"), true);
+    return;
+  }
+
+  // An onion connection may present a recipient-bound bearer pass without
+  // AUTH. Admission belongs only to this connection, never to an identity.
+  if (deps.store.dmPolicy(recipient.identity) === "passes" && !conn.admitted.has(toHex(parsed.recipientDevice))) {
+    sock.send(
+      errorFrame("dm_not_allowed", "recipient requires a valid anonymous pass"),
+      true,
+    );
+    return;
+  }
+
+  enqueueAndRespond(
+    deps, sock, parsed.recipientDevice, recipient.identity,
+    parsed.clientRef, parsed.ttlSec, parsed.ciphertext, now,
+  );
+}
+
+/** Общий хвост SEND и SEND_ANON: очередь получателя не отличает, как назвался отправитель. */
+function enqueueAndRespond(
+  deps: Deps,
+  sock: Socket,
+  recipientDevice: Uint8Array,
+  recipientIdentity: Uint8Array,
+  clientRef: Uint8Array,
+  ttlSecRequested: number,
+  ciphertext: Uint8Array,
+  now: number,
+): void {
+  // Потолок очереди получателя. Ведро отправителя его не заменяет: десять
+  // аккаунтов в пределах своих вёдер сложатся и всё равно зальют одного
+  // человека, а разгребать очередь ему.
+  const digest = deps.store.retryDigest(recipientDevice, clientRef, ciphertext);
+  const accepted = deps.store.acceptedRetry(digest, now);
+  if (accepted) {
+    sock.send(sendOkFrame(clientRef, accepted), true);
+    return;
+  }
+  if (deps.store.countQueued(recipientDevice, now) >= config.maxQueuedPerDevice) {
+    sock.send(errorFrame("recipient_queue_full", "recipient has too much undelivered mail"), true);
+    return;
+  }
+  const payloadBytes = ciphertext.byteLength;
+  if (deps.store.queuedBytes(recipientDevice, now) + payloadBytes
+      > config.maxQueuedBytesPerDevice
+      || deps.store.queuedBytesForIdentity(recipientIdentity, now) + payloadBytes
+      > config.maxQueuedBytesPerIdentity) {
+    sock.send(errorFrame("recipient_queue_full", "recipient storage quota reached"), true);
+    return;
+  }
+
+  const ttlSec = Math.min(ttlSecRequested, config.envelopeTtlSec);
+  // Копия обязательна: ciphertext — это view в буфер uWS.
+  const payload = ciphertext.slice();
+  const envelopeId = deps.store.enqueueOnce(digest, recipientDevice, payload, now, now + ttlSec * 1000);
+
+  sock.send(sendOkFrame(clientRef, envelopeId), true);
+  deps.registry.deliver(toHex(recipientDevice), envelopeFrame(envelopeId, now, payload));
+}
+
+/**
+ * Пачка билетов. Бюджет считается здесь, по личности — единственное место,
+ * где sealed sender вообще завязан на то, кто её попросил.
+ */
+function onTicketRequest(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
+  const now = deps.now();
+  const count = parseTicketRequest(body);
+  if (count === 0 || count > config.maxTicketsPerRequest) {
+    throw new BadInput("ticket_request: bad count");
+  }
+  const factor = conn.onion ? config.onionLimitFactor : 1;
+  if (!deps.ticketLimiter.allow(toHex(conn.identity!), now, factor)) {
+    sock.send(errorFrame("ticket_rate_limited", "slow down"), true);
+    return;
+  }
+  sock.send(ticketGrantFrame(deps.tickets.issue(count, now)), true);
+}
+
+function onAck(deps: Deps, sock: Socket, conn: ConnData, body: Uint8Array): void {
   const id = parseAck(body);
   // Проверка владения внутри запроса: чужой конверт не удалить.
   deps.store.ack(id, conn.devicePub!);
+  if (conn.queueInflight.delete(toHex(id))
+      && conn.queueInflight.size === 0) {
+    drainQueue(deps, sock, conn, deps.now());
+  }
 }
 
 // --- MLS KeyPackages ----------------------------------------------------------
@@ -1802,12 +2018,20 @@ function onKeyPackageClaim(deps: Deps, sock: Socket, conn: ConnData, body: Uint8
   sock.send(keyPackageFrame(clientRef, keyPackage ?? null), true);
 }
 
-/** Отдаём накопившееся, пока клиент успевает читать. Остаток — по реконнекту. */
-function drainQueue(deps: Deps, sock: Socket, devicePub: Uint8Array, now: number): void {
-  const pending = deps.store.pending(devicePub, now, DRAIN_BATCH);
+/** Resume after socket backpressure without waiting for a reconnect. */
+export function handleDrain(deps: Deps, sock: Socket, conn: ConnData): void {
+  if (conn.devicePub && conn.queueInflight.size === 0) drainQueue(deps, sock, conn, deps.now());
+}
+
+/** A bounded batch; only advance after its ACKs, never resend it per ACK. */
+function drainQueue(deps: Deps, sock: Socket, conn: ConnData, now: number): void {
+  const pending = deps.store.pending(conn.devicePub!, now, DRAIN_BATCH);
   for (const row of pending) {
     if (sock.getBufferedAmount() > DRAIN_BACKPRESSURE_BYTES) return;
-    sock.send(envelopeFrame(row.id, row.created_at, row.payload), true);
+    const status = sock.send(envelopeFrame(row.id, row.created_at, row.payload), true);
+    if (status === 2) return; // uWS dropped the frame; retry on drain.
+    conn.queueInflight.add(toHex(row.id));
+    if (status === 0) return; // Accepted into the socket buffer.
   }
   if (pending.length < DRAIN_BATCH) sock.send(frame(OP.QUEUE_DONE), true);
 }
