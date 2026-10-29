@@ -8,6 +8,8 @@ import { ascii, concat } from "../util/bytes.ts";
 const DOMAIN_AUTH = ascii("valanium-auth-v1");
 const DOMAIN_DEVICE = ascii("valanium-device-v1");
 const DOMAIN_REVOKE_OTHERS = ascii("valanium-device-revoke-others-v1");
+const DOMAIN_REVOKE_ONE = ascii("valanium-device-revoke-v1");
+const DOMAIN_TICKET = ascii("valanium-sealed-sender-ticket-v1");
 
 /** `sign(identity_priv, "valanium-device-v1" || identity_pub || device_pub)` */
 export function deviceCertMessage(identityPub: Uint8Array, devicePub: Uint8Array): Uint8Array {
@@ -29,6 +31,35 @@ export function revokeOtherDevicesMessage(
   keepDevicePub: Uint8Array,
 ): Uint8Array {
   return concat(DOMAIN_REVOKE_OTHERS, identityPub, keepDevicePub);
+}
+
+/**
+ * Отзыв одного устройства: подписывает identity-ключ, как и «выйти везде».
+ *
+ * Домен свой, и это не формальность. Совпади он с `revoke-others`, подпись,
+ * снятая для «отозвать вон то устройство», сгодилась бы для «отозвать все,
+ * кроме вон того» — то есть перехваченная просьба убрать один старый телефон
+ * выкидывала бы человека отовсюду.
+ *
+ * Ключ устройства для этого недостаточен: устройство, отзывающее соседей, —
+ * это в точности то, что делает укравший одно из них.
+ */
+export function revokeDeviceMessage(
+  identityPub: Uint8Array,
+  devicePub: Uint8Array,
+): Uint8Array {
+  return concat(DOMAIN_REVOKE_ONE, identityPub, devicePub);
+}
+
+/**
+ * `sign(ticket_priv, "valanium-sealed-sender-ticket-v1" || nonce || expiry)`
+ *
+ * Подписывает сервер сам себе: билет выпускает и проверяет один и тот же
+ * ключ, наружу он не выходит никогда — в отличие от подписи onion-входов, её
+ * не нужно доверять клиенту, поэтому ключ может жить прямо на сервере.
+ */
+export function ticketMessage(nonce: Uint8Array, expiry: Uint8Array): Uint8Array {
+  return concat(DOMAIN_TICKET, nonce, expiry);
 }
 
 /**

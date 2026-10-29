@@ -4,6 +4,7 @@ import { config } from "./config.ts";
 import { log } from "./log.ts";
 import { Store } from "./db/index.ts";
 import { NonceStore } from "./auth/nonce.ts";
+import { TicketKey, TicketStore } from "./auth/tickets.ts";
 import { RateLimiter } from "./util/ratelimit.ts";
 import {
   ConnectionCounter, ONION_KEY, blindedClient, clientAddress, isOnion, limitKey,
@@ -11,6 +12,7 @@ import {
 import { Registry, type Socket } from "./ws/registry.ts";
 import {
   handleClose,
+  handleDrain,
   handleMessage,
   handleOpen,
   newConnData,
@@ -31,12 +33,17 @@ const searchLimiter = new RateLimiter(config.maxSearchPerMinute, 60_000, config.
 const sendLimiter = new RateLimiter(config.maxSendPerMinute, 60_000, config.maxRateLimitKeys);
 const postLimiter = new RateLimiter(config.maxPostsPerMinute, 60_000, config.maxRateLimitKeys);
 const claimLimiter = new RateLimiter(config.maxClaimsPerHour, 3_600_000, config.maxRateLimitKeys);
+const ticketLimiter = new RateLimiter(config.maxTicketRequestsPerMinute, 60_000, config.maxRateLimitKeys);
+const tickets = new TicketStore(
+  TicketKey.load(config.dbPath), config.ticketTtlSec, config.maxOutstandingTickets,
+);
 const connections = new ConnectionCounter();
 const now = () => Date.now();
 
 const deps: Deps = {
   store, support, nonces, registry,
   authLimiter, recoveryLimiter, searchLimiter, sendLimiter, postLimiter, claimLimiter,
+  ticketLimiter, tickets,
   connections, now,
 };
 
@@ -103,6 +110,9 @@ app.ws<ConnData>("/ws", {
     handleMessage(deps, ws as unknown as Socket, ws.getUserData(), new Uint8Array(message.slice(0)));
   },
 
+  drain: (ws) => {
+    handleDrain(deps, ws as unknown as Socket, ws.getUserData());
+  },
   close: (ws) => {
     handleClose(deps, ws as unknown as Socket, ws.getUserData());
   },
@@ -176,7 +186,11 @@ const cleanup = setInterval(() => {
   searchLimiter.sweep(ts);
   sendLimiter.sweep(ts);
   postLimiter.sweep(ts);
-  log.info("sweep", { ...swept, online: registry.onlineDevices, addresses: connections.addresses });
+  ticketLimiter.sweep(ts);
+  tickets.sweep(ts);
+  // Avoid a durable minute-by-minute activity trace. Counts remain available
+  // through the authenticated admin endpoint instead of routine journal logs.
+  void swept;
 }, config.cleanupIntervalSec * 1000);
 cleanup.unref();
 
